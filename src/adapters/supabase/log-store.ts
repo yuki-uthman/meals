@@ -11,19 +11,11 @@ import type { DayLog, FoodPortion, IsoDate, Meal, MealSlot, NightInsulin } from 
 // account is not filtered out here; it is never sent.
 
 const MEAL_SELECT = `
-  id, slot, eaten_at, glucose_before, glucose_after, insulin_units,
+  id, slot, eaten_on, eaten_at, glucose_before, glucose_after, insulin_units,
   meal_foods ( name, food_type, amount, unit, position )
 `;
 
 const NIGHT_SELECT = 'id, night_on, units, taken_at, bedtime_glucose';
-
-/** The reader's own midnight-to-midnight window, not UTC's. */
-const dayBounds = (date: IsoDate): { readonly from: string; readonly to: string } => {
-  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
-  const from = new Date(year, month - 1, day, 0, 0, 0, 0);
-  const to = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
-  return { from: from.toISOString(), to: to.toISOString() };
-};
 
 const asNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null;
@@ -97,15 +89,15 @@ const toFailure = (error: PostgrestError, status: number): DayLogOutcome =>
 
 export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
   dayLog: async (date: IsoDate): Promise<DayLogOutcome> => {
-    const { from, to } = dayBounds(date);
-
     try {
+      // Both reads select on the date column, never on the timestamp, so the
+      // day a row belongs to is the one its writer meant and not whatever the
+      // server's UTC offset would make of its clock time.
       const [mealsResult, nightResult] = await Promise.all([
         client
           .from('meals')
           .select(MEAL_SELECT)
-          .gte('eaten_at', from)
-          .lt('eaten_at', to)
+          .eq('eaten_on', date)
           .order('eaten_at', { ascending: true }),
         client.from('night_insulin').select(NIGHT_SELECT).eq('night_on', date),
       ]);

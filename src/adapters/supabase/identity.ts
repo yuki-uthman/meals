@@ -19,7 +19,14 @@ const toAccount = (user: User): Account => ({ id: user.id, email: user.email ?? 
  * status, so anything without a status is treated as unreached rather than
  * reported to the person as a wrong password.
  */
-const isUnreachable = (error: { status?: number; name?: string }): boolean =>
+// The optional properties are spelled with an explicit `| undefined` because
+// browser sources typecheck under exactOptionalPropertyTypes, and Supabase's
+// AuthError declares `status` as a present `number | undefined` rather than an
+// absent-or-number property.
+const isUnreachable = (error: {
+  status?: number | undefined;
+  name?: string | undefined;
+}): boolean =>
   error.status === undefined || error.name === 'AuthRetryableFetchError';
 
 export const supabaseIdentity = (client: SupabaseClient): Identity => ({

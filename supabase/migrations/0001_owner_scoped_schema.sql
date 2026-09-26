@@ -17,6 +17,11 @@ create table public.meals (
                      references auth.users (id) on delete cascade,
   slot             text not null
                      check (slot in ('breakfast', 'lunch', 'dinner', 'snack')),
+  -- The local calendar date the meal belongs to, beside the clock time. Every
+  -- day query selects on this column and never on eaten_at, so no reading
+  -- depends on the server's UTC offset and a 22:30 meal cannot fall into the
+  -- neighbouring day.
+  eaten_on         date not null,
   eaten_at         timestamptz not null,
   glucose_before   integer check (glucose_before between 0 and 2000),
   glucose_after    integer check (glucose_after between 0 and 2000),
@@ -25,7 +30,7 @@ create table public.meals (
   note             text
 );
 
-create index meals_user_eaten_at_idx on public.meals (user_id, eaten_at);
+create index meals_user_eaten_on_idx on public.meals (user_id, eaten_on, eaten_at);
 
 -- ----------------------------------------------------------- meal_foods
 
@@ -35,7 +40,12 @@ create table public.meal_foods (
               references auth.users (id) on delete cascade,
   meal_id   uuid not null references public.meals (id) on delete cascade,
   name      text not null,
-  food_type text,
+  -- The seven food types the brief fixes. Stated as a constraint rather than a
+  -- convention, so a mistyped type is refused at the row rather than surfacing
+  -- as an unclassified food later.
+  food_type text not null
+              check (food_type in ('carb-heavy', 'protein', 'vegetable',
+                                   'fruit', 'dairy', 'mixed dish', 'drink')),
   amount    numeric(8, 2) check (amount >= 0),
   unit      text,
   position  integer not null default 0
