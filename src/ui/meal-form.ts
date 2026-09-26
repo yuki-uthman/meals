@@ -8,6 +8,9 @@ import {
   type MealSlot,
 } from '../domain/entry';
 import type { FoodDraft, MealDraft } from '../domain/meal-draft';
+import type { ReadingChip } from '../domain/recent-readings';
+import { numberPad } from './number-pad';
+import { doseStepper } from './stepper';
 
 // The New meal and Edit meal screen, as a pure function from a draft to a DOM
 // subtree. It renders the draft and reports what the person did; it decides
@@ -65,13 +68,40 @@ export const textField = (
   return wrapper;
 };
 
-/** A labelled number input. The keyboard that opens is the device's own. */
+/**
+ * The in-app pad attached to a glucose field: the chips it offers, whether it is
+ * currently open on this field, and how it opens and closes. A field with no pad
+ * keeps the device keyboard, which is what the food amount does.
+ */
+export type PadControl = {
+  readonly chips: readonly ReadingChip[];
+  readonly isOpen: boolean;
+  readonly onOpen: () => void;
+  readonly onClose: () => void;
+};
+
+export type NumberFieldControls = {
+  readonly pad?: PadControl;
+  /** A minus and a plus that move this dose by exactly one unit. */
+  readonly stepper?: boolean;
+};
+
+/**
+ * A labelled number input. With no controls the keyboard that opens is the
+ * device's own.
+ *
+ * Where a pad or a stepper is asked for, it is added *around* this same input:
+ * the field keeps its id, its label, its value and its editability, so the
+ * accessible name a person and an oracle both find it by never moves, and every
+ * screen built on this field goes on working untouched.
+ */
 export const numberField = (
   id: string,
   labelText: string,
   kind: NumericKind,
   value: string,
   onInput: (value: string) => void,
+  controls: NumberFieldControls = {},
 ): HTMLElement => {
   const wrapper = fieldWrapper();
 
@@ -82,11 +112,35 @@ export const numberField = (
   input.type = 'number';
   input.min = '0';
   input.step = NUMERIC_STEPS[kind];
-  input.inputMode = kind === 'glucose' ? 'numeric' : 'decimal';
+  // A field with the in-app pad asks the phone for no keyboard at all, so the
+  // pad has the screen to itself. It stays an ordinary focusable input, so a
+  // hardware keyboard and an automated fill both still reach it.
+  input.inputMode = controls.pad === undefined ? (kind === 'glucose' ? 'numeric' : 'decimal') : 'none';
   input.value = value;
   input.addEventListener('input', () => onInput(input.value));
 
-  wrapper.append(fieldLabel(id, labelText), input);
+  const { pad } = controls;
+  if (pad !== undefined) {
+    const open = (): void => {
+      if (!pad.isOpen) pad.onOpen();
+    };
+    // Tapping the field opens the pad, and so does reaching it with a keyboard:
+    // arriving at the field is what asks for a way to fill it in.
+    input.addEventListener('click', open);
+    input.addEventListener('focus', open);
+  }
+
+  wrapper.append(
+    fieldLabel(id, labelText),
+    controls.stepper === true ? doseStepper(input, onInput) : input,
+  );
+
+  if (pad !== undefined && pad.isOpen) {
+    wrapper.append(
+      numberPad(input, pad.chips, { onValue: onInput, onDone: () => pad.onClose() }),
+    );
+  }
+
   return wrapper;
 };
 
@@ -187,13 +241,34 @@ export const formScreen = (className: string): HTMLElement => {
 
 // ------------------------------------------------------------- the meal screen
 
+/** Which glucose field the in-app pad is currently open on, if any. */
+export type MealPadTarget = 'glucose-before' | 'glucose-after' | null;
+
+/**
+ * The chips each glucose field's pad offers. They differ on purpose: the before
+ * field is offered what this person tends to sit at going into this slot, while
+ * the after field has no such thing and is offered only the last reading.
+ */
+export type MealPadChips = {
+  readonly before: readonly ReadingChip[];
+  readonly after: readonly ReadingChip[];
+};
+
+export const NO_PAD_CHIPS: MealPadChips = { before: [], after: [] };
+
 export type MealFormState = {
   readonly draft: MealDraft;
+  /** Closed unless a glucose field was tapped. */
+  readonly padTarget?: MealPadTarget;
+  /** Absent where nothing was recorded to put on a chip. */
+  readonly chips?: MealPadChips;
   /** A refusal or retry message, shown in place with every value still filled in. */
   readonly message: string | null;
 };
 
 export type MealFormHandlers = {
+  readonly onOpenPad?: (target: Exclude<MealPadTarget, null>) => void;
+  readonly onClosePad?: () => void;
   readonly onSlot: (slot: MealSlot) => void;
   readonly onTime: (time: string) => void;
   readonly onGlucoseBefore: (value: string) => void;
@@ -272,6 +347,10 @@ const foodList = (state: MealFormState, handlers: MealFormHandlers): HTMLElement
 export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTMLElement => {
   const screen = formScreen('form--meal');
   const { draft } = state;
+  const chips = state.chips ?? NO_PAD_CHIPS;
+  const padTarget = state.padTarget ?? null;
+  const openPad = (target: Exclude<MealPadTarget, null>): void => handlers.onOpenPad?.(target);
+  const closePad = (): void => handlers.onClosePad?.();
 
   if (state.message !== null) screen.append(notice(state.message));
 
@@ -290,6 +369,14 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       'glucose',
       draft.glucoseBefore,
       handlers.onGlucoseBefore,
+      {
+        pad: {
+          chips: chips.before,
+          isOpen: padTarget === 'glucose-before',
+          onOpen: () => openPad('glucose-before'),
+          onClose: () => closePad(),
+        },
+      },
     ),
     foodList(state, handlers),
     numberField(
@@ -298,6 +385,7 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       'dose',
       draft.insulinUnits,
       handlers.onInsulinUnits,
+      { stepper: true },
     ),
     choiceGroup<ExerciseContext>(
       'meal-exercise',
@@ -318,6 +406,14 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       'glucose',
       draft.glucoseAfter,
       handlers.onGlucoseAfter,
+      {
+        pad: {
+          chips: chips.after,
+          isOpen: padTarget === 'glucose-after',
+          onOpen: () => openPad('glucose-after'),
+          onClose: () => closePad(),
+        },
+      },
     ),
   );
 

@@ -1,6 +1,7 @@
 import type { DayLog, IsoDate } from '../domain/entry';
 import type { MealRecording } from '../domain/meal-draft';
 import type { NightRecording, NightWindow } from '../domain/night';
+import type { RecentMeal } from '../domain/recent-readings';
 
 // Reading the signed-in account's own entries for one date, and recording a meal.
 //
@@ -53,8 +54,21 @@ export type NightWindowOutcome =
   | { readonly kind: 'retry'; readonly message: string }
   | { readonly kind: 'session-ended'; readonly message: string };
 
+export type RecentMealsOutcome =
+  | { readonly kind: 'loaded'; readonly meals: readonly RecentMeal[] }
+  /** The server could not be reached. The pad simply carries no chips. */
+  | { readonly kind: 'retry'; readonly message: string }
+  | { readonly kind: 'session-ended'; readonly message: string };
+
 export type LogStore = {
   dayLog: (date: IsoDate) => Promise<DayLogOutcome>;
+  /**
+   * The `count` most recent meals on or before `onOrBefore`, newest first, with
+   * just the readings a chip needs. Which of them is 'the last reading' is the
+   * domain's rule, not this query's, so every candidate comes back and nothing
+   * about the pad's offer is decided in SQL.
+   */
+  recentMeals: (onOrBefore: IsoDate, count: number) => Promise<RecentMealsOutcome>;
   /**
    * Records a meal with its foods, or updates the meal the recording names. One
    * entry point for both, because adding the after reading later must update that

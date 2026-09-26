@@ -5,9 +5,11 @@ import {
   type DayLogOutcome,
   type LogStore,
   type NightWindowOutcome,
+  type RecentMealsOutcome,
   type SaveMealOutcome,
   type SaveNightOutcome,
 } from '../../ports/log-store';
+import type { RecentMeal } from '../../domain/recent-readings';
 import { shiftDate } from '../../domain/entry';
 import type {
   DayLog,
@@ -283,7 +285,52 @@ const toMorningMeal = (row: MorningRow): MorningMeal => ({
   glucoseBefore: asNumber(row.glucose_before),
 });
 
+const RECENT_MEAL_SELECT = 'id, slot, eaten_on, eaten_at, glucose_before, glucose_after';
+
+type RecentMealRow = {
+  id?: unknown;
+  slot?: unknown;
+  eaten_on?: unknown;
+  eaten_at?: unknown;
+  glucose_before?: unknown;
+  glucose_after?: unknown;
+};
+
+const toRecentMeal = (row: RecentMealRow): RecentMeal => ({
+  id: String(row.id),
+  slot: String(row.slot) as MealSlot,
+  eatenOn: String(row.eaten_on),
+  eatenAt: new Date(String(row.eaten_at)),
+  glucoseBefore: asNumber(row.glucose_before),
+  glucoseAfter: asNumber(row.glucose_after),
+});
+
+/** And for the recent-readings read, read exactly the same way. */
+const toRecentFailure = (error: PostgrestError, status: number): RecentMealsOutcome =>
+  isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+
 export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
+  recentMeals: async (onOrBefore: IsoDate, count: number): Promise<RecentMealsOutcome> => {
+    try {
+      // No user_id filter here either: row-level security is the only thing that
+      // decides whose readings a chip can ever repeat. Selected on eaten_on, so
+      // the window is the person's own calendar rather than the server's.
+      const result = await client
+        .from('meals')
+        .select(RECENT_MEAL_SELECT)
+        .lte('eaten_on', onOrBefore)
+        .order('eaten_on', { ascending: false })
+        .order('eaten_at', { ascending: false })
+        .limit(count);
+      if (result.error !== null) return toRecentFailure(result.error, result.status);
+      return { kind: 'loaded', meals: ((result.data ?? []) as RecentMealRow[]).map(toRecentMeal) };
+    } catch {
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
   saveMeal: async (recording: MealRecording): Promise<SaveMealOutcome> => {
     try {
       return recording.id === null

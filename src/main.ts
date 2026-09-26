@@ -42,10 +42,17 @@ import {
   NIGHT_WINDOW,
   type NightDraft,
 } from './domain/night';
+import {
+  lastReadingChip,
+  readingChips,
+  RECENT_MEALS_WINDOW,
+  type ReadingChip,
+  type RecentMeal,
+} from './domain/recent-readings';
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { FOOD_FORM_TITLE, foodForm } from './ui/food-form';
-import { mealForm, mealFormTitle } from './ui/meal-form';
+import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { shell, type ShellHandlers } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
@@ -84,6 +91,15 @@ const start = (): void => {
    * after, so the list is never a row of blanks that reads as five empty nights.
    */
   let nightHistory: NightHistory | null = null;
+  /**
+   * The recent meals the pad's chips are read off. They are fetched before a
+   * form is shown, for the same reason the five nights are: a chip that arrived
+   * after the person had already started keying would be a moving target.
+   */
+  let recentMeals: readonly RecentMeal[] = [];
+  /** Which field the in-app pad is open on. Closed unless a glucose field asked. */
+  let padTarget: MealPadTarget = null;
+  let nightPadOpen = false;
   /** A refusal or retry from the screen the person is on, shown in place. */
   let formMessage: string | null = null;
   let saving = false;
@@ -100,19 +116,41 @@ const start = (): void => {
       dayHandlers,
       dayLogSection(dayLogState, {
         onRetry: () => void loadDayLog(),
-        onLogSlot: (slot) => logSlot(slot),
-        onEditMeal: (id) => editMeal(id),
+        onLogSlot: (slot) => void logSlot(slot),
+        onEditMeal: (id) => void editMeal(id),
         onOpenNight: () => void openNight(),
       }),
     );
+
+  /** The readings a chip may repeat, never a number this app worked out. */
+  const presentChips = (chips: readonly (ReadingChip | null)[]): readonly ReadingChip[] =>
+    chips.filter((chip): chip is ReadingChip => chip !== null);
+
+  /**
+   * The before field is offered both chips; the after field only the last
+   * reading, because there is no such thing as 'the after reading you usually
+   * start dinner on'. The meal being edited is excluded from its own history.
+   */
+  const mealChips = (draft: MealDraft): MealPadChips => ({
+    before: readingChips(recentMeals, draft.slot, draft.mealId),
+    after: presentChips([lastReadingChip(recentMeals, draft.mealId)]),
+  });
 
   const mealScreen = (draft: MealDraft): HTMLElement =>
     shell(
       { date, isToday: date === localToday(), form: { title: mealFormTitle(draft), busy: saving } },
       { ...dayHandlers, onCancel: () => leaveForm(), onSave: () => void saveMeal() },
       mealForm(
-        { draft, message: formMessage },
+        { draft, padTarget, chips: mealChips(draft), message: formMessage },
         {
+          onOpenPad: (target) => {
+            padTarget = target;
+            render();
+          },
+          onClosePad: () => {
+            padTarget = null;
+            render();
+          },
           onSlot: (slot) => patchMeal({ slot }),
           onTime: (time) => patchMeal({ time }),
           onGlucoseBefore: (glucoseBefore) => patchMeal({ glucoseBefore }),
@@ -150,8 +188,22 @@ const start = (): void => {
       },
       { ...dayHandlers, onCancel: () => leaveForm(), onSave: () => void saveNight() },
       nightForm(
-        { draft, history, message: formMessage },
         {
+          draft,
+          history,
+          padOpen: nightPadOpen,
+          chips: presentChips([lastReadingChip(recentMeals)]),
+          message: formMessage,
+        },
+        {
+          onOpenPad: () => {
+            nightPadOpen = true;
+            render();
+          },
+          onClosePad: () => {
+            nightPadOpen = false;
+            render();
+          },
           onUnits: (units) => patchNight({ units }),
           onTakenAt: (takenAt) => patchNight({ takenAt }),
           onBedtimeGlucose: (bedtimeGlucose) => patchNight({ bedtimeGlucose }),
@@ -211,6 +263,9 @@ const start = (): void => {
       await endSession(outcome.message);
       return;
     }
+    // The bedtime glucose gets the same pad, so its chips are in hand before the
+    // screen is shown too.
+    if (!(await loadRecentMeals(opening))) return;
     // A step to another day while the read was in flight wins: the screen must
     // never open on one date holding another date's nights.
     if (opening !== date) return;
@@ -226,33 +281,63 @@ const start = (): void => {
     mealDraft = null;
     foodDraft = null;
     formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
     screen = 'night';
     render();
   };
 
-  const logSlot = (slot: MealSlot): void => {
+  /**
+   * The material the pad's chips are read off. A read that failed costs the
+   * chips and nothing else: filling in a meal must never wait on a convenience,
+   * so the form opens with a pad that simply carries no chips.
+   */
+  const loadRecentMeals = async (upTo: IsoDate): Promise<boolean> => {
+    const outcome = await logStore.recentMeals(upTo, RECENT_MEALS_WINDOW);
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return false;
+    }
+    recentMeals = outcome.kind === 'loaded' ? outcome.meals : [];
+    return true;
+  };
+
+  const logSlot = async (slot: MealSlot): Promise<void> => {
+    const opening = date;
+    if (!(await loadRecentMeals(opening))) return;
+    // A step to another day while the read was in flight wins, exactly as it
+    // does for the night screen.
+    if (opening !== date) return;
+
     // The slot comes through already chosen, and the meal is recorded against the
     // date being read rather than against the server's idea of now.
-    mealDraft = newMealDraft(date, slot);
+    mealDraft = newMealDraft(opening, slot);
     foodDraft = null;
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
+    padTarget = null;
     screen = 'meal';
     render();
   };
 
-  const editMeal = (id: string): void => {
+  const editMeal = async (id: string): Promise<void> => {
     if (dayLogState.kind !== 'loaded') return;
     const meal = dayLogState.log.meals.find((candidate) => candidate.id === id);
     if (meal === undefined) return;
+
+    const opening = date;
+    if (!(await loadRecentMeals(opening))) return;
+    if (opening !== date) return;
+
     // Carrying the meal's id is what makes the save update this row, so adding the
     // after reading later cannot produce a second meal on the date.
-    mealDraft = mealDraftFrom(meal, date);
+    mealDraft = mealDraftFrom(meal, opening);
     foodDraft = null;
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
+    padTarget = null;
     screen = 'meal';
     render();
   };
@@ -263,6 +348,8 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
     screen = 'day';
     render();
   };
@@ -270,6 +357,9 @@ const start = (): void => {
   const openFoodForm = (): void => {
     foodDraft = emptyFoodDraft;
     formMessage = null;
+    // The pad belongs to the field it was opened on; leaving that screen closes
+    // it rather than carrying it to the next one.
+    padTarget = null;
     screen = 'food';
     render();
   };
@@ -277,6 +367,7 @@ const start = (): void => {
   const backToMeal = (): void => {
     foodDraft = null;
     formMessage = null;
+    padTarget = null;
     screen = 'meal';
     render();
   };
@@ -325,6 +416,7 @@ const start = (): void => {
       mealDraft = null;
       foodDraft = null;
       formMessage = null;
+      padTarget = null;
       screen = 'day';
       void loadDayLog();
       return;
@@ -366,6 +458,7 @@ const start = (): void => {
       nightDraft = null;
       nightHistory = null;
       formMessage = null;
+      nightPadOpen = false;
       screen = 'day';
       void loadDayLog();
       return;
@@ -391,6 +484,10 @@ const start = (): void => {
     nightHistory = null;
     formMessage = null;
     saving = false;
+    padTarget = null;
+    nightPadOpen = false;
+    // Readings belong to the account that recorded them, so they go with it.
+    recentMeals = [];
     signInState = { ...emptySignInState, message };
     render();
   };
@@ -445,6 +542,11 @@ const start = (): void => {
     nightHistory = null;
     formMessage = null;
     saving = false;
+    padTarget = null;
+    nightPadOpen = false;
+    // A change of hands takes the previous person's readings with it: a chip must
+    // never repeat a reading that belongs to somebody else.
+    recentMeals = [];
     if (account === null) {
       render();
       return;

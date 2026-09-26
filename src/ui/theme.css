@@ -527,3 +527,119 @@ label {
   color: var(--ink-muted);
   font-weight: 400;
 }
+
+/* ------------------------------------ the number pad and the dose stepper */
+
+/* The pad sits under the field it writes into. Its keys are laid out in a
+   three-column grid of fractional widths, so at 360 px they are thumb-sized and
+   at any width above it they simply grow: no fixed width anywhere, and nothing
+   that can push the document sideways. */
+.number-pad {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* The chips wrap onto as many rows as the width needs. A chip is deliberately
+   quiet: it repeats a reading the person took, and must not read as advice. */
+.number-pad__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.number-pad__chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.number-pad__keys {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.number-pad__key {
+  min-width: 0;
+  /* A comfortable thumb target, in text units so it follows the reader's own
+     text size rather than fighting it. */
+  padding: var(--space-3) 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.number-pad__actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.number-pad__action {
+  min-width: 0;
+  padding: var(--space-3) 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.number-pad__action--done {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* Minus, the dose field, plus. The field takes the room that is left, so the
+   row is fluid and the two controls stay the same size at every width. */
+.stepper {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.stepper .field__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepper__button {
+  flex: 0 0 auto;
+  width: 3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
