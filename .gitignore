@@ -1,5 +1,6 @@
 # DES runtime coordination state — machine-local, never a source artifact
 .nwave/des/commit.lock
+.nwave/des/logs/
 
 # Node / tooling
 node_modules/
