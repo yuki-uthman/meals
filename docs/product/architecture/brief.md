@@ -107,3 +107,96 @@ Oracle target locator: `tests/acceptance/own-data-only.spec.ts`
 
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/own-data-only.spec.ts`
+## Meal & Insulin Log product brief, value 2: the Today screen
+
+### Purpose
+Reshape the plain day log into the Today screen the canvas draws: the date with a day stepper, a card per logged meal showing slot, time, foods, dose and before to after with the change, a 'Not logged yet' card for each empty fixed slot, and a night insulin card.
+
+### Constraints
+- The front end is a static bundle only; GitHub Pages serves prebuilt files and there is no server process to operate.
+- Row-level security stays the only thing that scopes a read; no screen may filter by user_id.
+- The layout is fluid with no fixed page width and no horizontal scrolling at any viewport width from 360 px upward.
+- Light and dark palettes come from the canvas design reference and follow the device setting.
+- Glucose is shown in mg/dL as whole numbers.
+- The app never recommends a dose, and a colour band is a description of what happened, never advice.
+- The Today screen reads; it does not write. Recording a meal is value 3.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/entry.ts` | EXTEND | Add the change between the two readings and the per-slot grouping the cards need, beside the line formatting value 1 established. |
+| `src/domain/band.ts` | CREATE_NEW | The level bands and the change bands from the brief's decisions, in one place, because History in value 9 is judged on exactly the same rule. |
+| `src/ui/day-log.ts` | EXTEND | The plain line list becomes the card list this value is judged on: a card per logged meal, a 'Not logged yet' card per empty fixed slot, and the night insulin card. |
+| `src/ui/shell.ts` | EXTEND | The header becomes the designed one: the weekday and date above the heading, with the previous and next day controls. |
+| `src/ui/theme.css` | EXTEND | Card, chip, pill and band tokens for both palettes. |
+| `src/main.ts` | EXTEND | Hold the date being read and re-read the day log when the stepper moves it. |
+| `tests/acceptance/today-screen.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- The Today screen shows three fixed slots in order: breakfast, lunch, dinner. Each is either a meal card or a 'Not logged yet' card. A snack is not a fixed slot: a logged snack appears as its own card after dinner, and no empty snack card is ever shown.
+- A meal card shows the slot label, the clock time as HH:MM, the foods joined with ' · ' as 'Oats 60 g · Milk 200 ml', the dose as '5 u', and the two readings with the change, as '104', '186' and '+82'.
+- The change is after minus before. It is written with an explicit sign: '+82', '−18' using the true minus sign U+2212, and '0' for no change. When either reading is missing there is no change and the card shows only the reading it has.
+- An empty fixed slot card shows the slot label and exactly 'Not logged yet'.
+- The night insulin card shows 'Night insulin' and the dose line '18 u at 22:30'. When nothing is recorded for the date it shows 'Night insulin' and exactly 'Not logged yet'.
+- The four change bands are the brief's: dropped is a change of −40 or less, stable is −39 to +30, rose is +31 to +60, rose-high is more than +60. The four level bands are: low under 70, in-range 70 to 180, high 181 to 250, very-high over 250.
+- A band is published in the DOM as a data-change-band or data-level-band attribute carrying one of those names, and the colour is bound to the attribute in CSS. The oracle asserts the band name, not a colour, because a band is the rule under test and a hex value is how it happens to be painted.
+- Band colours, both palettes, from the canvas: dropped #2F5FA8, stable #2E7D4F, rose #B45309, rose-high #7C3A0B; low #B42318, in-range #2E7D4F, high #B45309, very-high #7C3A0B. The canvas keeps these unchanged between light and dark on purpose, so the two themes read the same.
+- Today's card colours the change only, never the level, because the card is a judgement about the meal. The level bands exist for History's Before view in value 9 and are unused here.
+- The header shows the weekday and date above the heading, and the heading is 'Today' when the date being read is the local today and the date itself otherwise. Previous-day and next-day controls carry the accessible names 'Previous day' and 'Next day'; the next-day control is disabled when the date being read is today, because the log has no future.
+- The date being read lives in the composition root, not in a screen. Moving it re-reads the day log through the same port, so nothing caches another day's rows.
+- Cards are read-only in this value. Nothing on the Today screen opens a meal or records one; value 3 records and value 6 opens.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| foodText | `src/domain/entry.ts:57` | REUSE | The card's food segment is the same text the plain line used; only the joiner differs. |
+| clockTime | `src/domain/entry.ts:50` | REUSE | The card's time is the same local HH:MM. |
+| slotLabel | `src/domain/entry.ts:47` | REUSE | The card heading and the empty slot card both name the slot the same way. |
+| nightInsulinLine | `src/domain/entry.ts:75` | REUSE | '18 u at 22:30' is exactly the night card's dose line. |
+| mealLine | `src/domain/entry.ts:68` | REPLACE | The one-line form existed so value 1 had a reading surface. The card supersedes it and nothing else calls it. |
+| dayLogLines | `src/domain/entry.ts:83` | REPLACE | Replaced by a per-slot projection, because the screen is now grouped by slot and must show slots that have no meal. |
+| dayLogSection | `src/ui/day-log.ts:38` | EXTEND | Keeps its loading, failed and retry states, which are unchanged; only the loaded branch becomes cards. |
+| LogStore | `src/ports/log-store.ts:17` | REUSE | The port already reads one date's meals and night insulin, which is everything this screen needs. |
+| dateHeading | `src/ui/shell.ts:18` | EXTEND | Already renders a local date; gains the 'Today' form and the uppercase weekday line. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/own-data-only.spec.ts`
+
+Move: Before the cards are built, lift the band rules out of nothing and into src/domain/band.ts, and split the day log's loaded branch from its loading, failed and retry branches, so the card work touches one branch of one function rather than rewriting the screen.
+
+Preserved observation: A person signs in and sees only their own entries for the date, and a second account sees none of them. Value 1's oracle keeps passing throughout, because the rows read and the port they are read through do not change.
+
+### Agreement analysis
+Not applicable: No released contract changes. The schema is untouched and the log-store port keeps its shape, so no producer or consumer is left on an older agreement.
+
+### Boundaries
+- Driving port: A person reading the Today screen on a phone: see the date, the meals already logged with their doses and readings, which slots are still empty, and the night dose.
+- Driven port: The log-store port, unchanged, for one date's meals and night insulin.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The cards are pure functions of a day log and depend on src/domain; src/domain depends on nothing. The Supabase adapters are untouched by this value.
+- Failure: Condition: The day log read fails because the server is unreachable. | Outcome: Retry | Observation: The screen shows 'Cannot reach the server. Try again.' with a usable retry control and no cards at all, rather than a grid of empty slots that would read as a day with nothing logged.
+- Failure: Condition: A meal has a before reading but no after reading yet. | Outcome: Refusal | Observation: The card shows the before reading alone, with no arrow and no change, because a change that has not happened must not be drawn as zero.
+- Failure: Condition: The next-day control is used while the date being read is today. | Outcome: Refusal | Observation: The control is disabled and the date does not move, because the log has no future.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: After sign-in the Today screen shows the date, a card per logged meal (slot, time, foods, dose, before → after with the change), a 'not logged yet' card for an empty slot, and a night insulin card.
+
+Stimulus: Account A owns, dated today in local terms: a breakfast at 07:40 (Oats carb-heavy 60 g, Milk dairy 200 ml, before 104, after 186, 5 units) and a lunch at 12:55 (Chicken rice mixed dish 250 g, Cucumber salad vegetable 80 g, before 112, after 133, 6 units), no dinner, and night insulin of 18 units at 22:30 with bedtime glucose 132. Dated yesterday it owns a single dinner at 19:10 (Soup mixed dish 300 ml, before 150, after 110, 4 units). A browser at a 360 px viewport signs in as account A on the built bundle, reads the Today screen, then uses the previous-day control.
+
+Expected: The header reads 'Today'. A Breakfast card shows 07:40, 'Oats 60 g · Milk 200 ml', '5 u', '104', '186' and '+82' in the rose-high change band. A Lunch card shows 12:55, 'Chicken rice 250 g · Cucumber salad 80 g', '6 u', '112', '133' and '+21' in the stable change band. A Dinner card shows 'Not logged yet'. A night insulin card shows 'Night insulin' and '18 u at 22:30'. The next-day control is disabled. After the previous-day control the header shows yesterday's date rather than 'Today', a Dinner card shows 19:10 and '−40' in the dropped change band, and Breakfast and Lunch both show 'Not logged yet'. The page never scrolls horizontally.
+
+Falsifier: Any of those card texts is absent or attached to the wrong slot, or a change is unsigned or wrongly signed, or a change carries the wrong band name, or an empty slot shows anything but 'Not logged yet', or the night insulin card is missing, or the next-day control is usable while today is being read, or the previous-day control does not move the date and its entries, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/today-screen.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/today-screen.spec.ts`
+Verification command: `npm run test:acceptance`
