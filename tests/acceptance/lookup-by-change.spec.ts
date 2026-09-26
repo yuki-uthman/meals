@@ -89,6 +89,12 @@ type SeedMeal = {
  * are the oracle's own choice, as value 10's clock times were: every meal is on a different
  * date, so nothing here can flatter the ordering under test, and a distinct dose and amount per
  * meal is what lets 'the result shows ITS dose' be checked rather than 'a dose'.
+ *
+ * Every reading in the fixture is a DIFFERENT number, across meals and across before/after
+ * alike, and so is every dose and every Rice amount. Absence is checked by reading the results
+ * region's text, so a number shared by a listed meal and an excluded one would make 'this
+ * excluded meal is not listed' unsatisfiable rather than false. Keeping the numbers mutually
+ * distinct means no assertion has to reason about which meal a bare number came from.
  */
 const seedMeals: readonly SeedMeal[] = [
   // +20: exactly the target.
@@ -98,9 +104,9 @@ const seedMeals: readonly SeedMeal[] = [
   // +17: 3 off.
   { daysAgo: 4, slot: 'dinner', hour: 19, minute: 30, before: 100, after: 117, units: 5, riceAmount: 300 },
   // +28: 8 off, inside ±10 and outside ±5.
-  { daysAgo: 5, slot: 'lunch', hour: 12, minute: 20, before: 140, after: 168, units: 8, riceAmount: 180 },
+  { daysAgo: 5, slot: 'lunch', hour: 12, minute: 20, before: 160, after: 188, units: 8, riceAmount: 180 },
   // −30: 50 off, outside every window.
-  { daysAgo: 6, slot: 'dinner', hour: 18, minute: 45, before: 150, after: 120, units: 9, riceAmount: 200 },
+  { daysAgo: 6, slot: 'dinner', hour: 18, minute: 45, before: 185, after: 155, units: 9, riceAmount: 200 },
   // No after reading: no change, so absent from every window.
   { daysAgo: 7, slot: 'breakfast', hour: 7, minute: 40, before: 110, units: 4, riceAmount: 150 },
 ];
@@ -118,7 +124,7 @@ const mealAt = (daysAgo: number): SeedMeal => {
 const NO_AFTER_VALUES = ['110', '4 u', 'Rice 150 g'] as const;
 
 /** Everything the −30 meal records, which is 50 off and never within a window either. */
-const FAR_VALUES = ['150', '120', '9 u', 'Rice 200 g'] as const;
+const FAR_VALUES = ['185', '155', '9 u', 'Rice 200 g'] as const;
 
 // --- What each result must read ---------------------------------------------
 
@@ -161,7 +167,7 @@ const threeOff: ResultExpectation = {
 const eightOff: ResultExpectation = {
   daysAgo: 5,
   slot: /lunch/i,
-  reads: ['8 u', 'Rice 180 g', '140', '168', '+28'],
+  reads: ['8 u', 'Rice 180 g', '160', '188', '+28'],
   distance: '8 off',
   band: 'stable',
 };
@@ -426,7 +432,7 @@ test('a target and a window list the nearest meals, nearest first, with how far 
   // With no target the screen invites one rather than listing everything the account owns.
   await expect(await resultRows(phone), 'no target, nothing listed').toHaveCount(0);
   const beforeTyping = normaliseSigns(await textOf(phone.locator('body')));
-  for (const reading of ['140', '152', '117', '168']) {
+  for (const reading of ['140', '152', '117', '188']) {
     expect(beforeTyping, `no target does not list ${reading}`).not.toContain(reading);
   }
 
@@ -537,7 +543,7 @@ test("another account's lookup by change reaches none of the owner's meals", asy
   await expect(await resultRows(phone)).toHaveCount(0);
 
   const bodyText = await textOf(phone.locator('body'));
-  for (const owned of ['120', '140', '130', '152', '100', '117', '168']) {
+  for (const owned of ['120', '140', '130', '152', '100', '117', '160', '188', '185', '155']) {
     expect(bodyText, `the owner's ${owned} is not in this lookup`).not.toContain(owned);
   }
 });
