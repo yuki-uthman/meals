@@ -30,6 +30,7 @@ import {
   mealDraftRefusal,
   mealRecording,
   newMealDraft,
+  repeatMealDraft,
   withFood,
   withoutFood,
   type FoodDraft,
@@ -140,7 +141,7 @@ const start = (): void => {
       dayHandlers,
       mealDetailScreen(
         { meal, instances: detailInstances, message: detailMessage },
-        { onBack: () => backToDay() },
+        { onBack: () => backToDay(), onLogAgain: () => void logAgain(meal) },
       ),
     );
 
@@ -356,6 +357,32 @@ const start = (): void => {
     // Carrying the meal's id is what makes the save update this row, so adding the
     // after reading later cannot produce a second meal on the date.
     mealDraft = mealDraftFrom(meal, opening);
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    screen = 'meal';
+    render();
+  };
+
+  /**
+   * The same foods again, as a new meal on TODAY -- whichever date was browsed to
+   * find the source. Repeating a meal is something done when eating it again, so
+   * the entry belongs to the day it is made on, and the date being read moves with
+   * it rather than leaving the form recording against a day in the past.
+   *
+   * Nothing of the source but its foods and its slot travels, and the source row
+   * is neither carried nor touched: the draft has no meal id, so saving writes a
+   * second record and the first keeps its own readings, dose, context and note.
+   */
+  const logAgain = async (source: Meal): Promise<void> => {
+    const opening = localToday();
+    if (!(await loadRecentMeals(opening))) return;
+
+    date = opening;
+    mealDraft = repeatMealDraft(source, opening);
+    clearDetail();
     foodDraft = null;
     nightDraft = null;
     nightHistory = null;

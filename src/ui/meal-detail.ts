@@ -32,9 +32,18 @@ export type MealDetailView = {
 
 export type MealDetailHandlers = {
   readonly onBack: () => void;
+  /** Opens a new meal holding only this meal's foods and amounts. */
+  readonly onLogAgain?: () => void;
 };
 
 export const BACK_LABEL = 'Back to the day';
+
+/**
+ * The control's name says what travels. 'Log again' alone would leave a person
+ * guessing whether the dose and the readings came too; naming the foods makes the
+ * promise the same as the behaviour.
+ */
+export const LOG_AGAIN_LABEL = 'Log again with these foods';
 
 const element = (tag: string, className: string, text?: string): HTMLElement => {
   const node = document.createElement(tag);
@@ -193,6 +202,18 @@ export const mealDetailScreen = (
   back.textContent = BACK_LABEL;
   back.addEventListener('click', () => handlers.onBack());
 
-  screen.append(back, detailRegion(view.meal), instancesRegion(view));
+  screen.append(back, detailRegion(view.meal));
+
+  // Repeating needs foods to copy, so a meal recorded without any offers nothing.
+  if (view.meal.foods.length > 0) {
+    const again = document.createElement('button');
+    again.className = 'button button--again';
+    again.type = 'button';
+    again.textContent = LOG_AGAIN_LABEL;
+    again.addEventListener('click', () => handlers.onLogAgain?.());
+    screen.append(again);
+  }
+
+  screen.append(instancesRegion(view));
   return screen;
 };

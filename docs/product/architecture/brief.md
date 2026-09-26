@@ -598,6 +598,8 @@ From a meal, start a fresh entry with only its foods and amounts copied, so the 
 | `src/ui/theme.css` | EXTEND | The copied-food row and the subtitle, in both palettes. |
 | `src/main.ts` | EXTEND | Route from a meal into a fresh entry seeded from it, and back to Today after the save. |
 | `tests/acceptance/log-again.spec.ts` | CREATE_NEW | The public oracle for this value. |
+| `src/ports/log-store.ts` | EXTEND | Add the by-id meal read value 6 declared and was never built, so a detail does not depend on which day is loaded. |
+| `src/adapters/supabase/log-store.ts` | EXTEND | Read one meal with its foods by id, still with no user_id of its own. |
 
 ### Paradigm
 functional
@@ -611,6 +613,8 @@ functional
 - Saving creates a new meal and touches nothing on the source. The source keeps its own readings, dose, context and note, and the repeat is a separate row, because the entire premise of the product is comparing two instances of the same composition.
 - The form names its source: 'same foods as Thu 10 Sep · Dinner' under the heading. A copied food's amount is editable, and changing it makes the entry a different meal by the identity rule of value 6, which is correct and needs no warning.
 - Value 8's expected-after estimate is not built here. This value copies foods and records a separate entry; the estimate is the next value.
+- A meal detail is opened by reading that meal BY ITS ID through the port, never by looking it up in whatever day log happens to be loaded. Value 6 declared that read and it was not built; the detail was assembled from the day-log snapshot instead, so opening a meal could silently do nothing when the snapshot did not hold it. Measured: after saving a repeat and stepping back to the source's day, tapping the card left the person on the day log with no explanation.
+- Opening a meal must never silently do nothing. Every path either shows the detail or says why not: a meal the account cannot read shows 'That meal is not here.' with a way back. A guard that returns quietly is a dead control, which is worse than an error because the person cannot tell it from a missed tap.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -638,6 +642,7 @@ Not applicable: The seams are already in place: the meal form takes a draft, the
 - Failure: Condition: The save fails after the foods were copied. | Outcome: Retry | Observation: The screen keeps every copied food and every value entered, shows 'Cannot reach the server. Try again.', and the source meal is untouched.
 - Failure: Condition: Every copied food is removed before saving. | Outcome: Refusal | Observation: Saving is refused with 'Add at least one food.', exactly as a meal recorded from scratch is, because an entry with no foods cannot be compared with anything.
 - Failure: Condition: The source meal has been deleted or hidden by row-level security between opening it and repeating it. | Outcome: Refusal | Observation: The screen shows 'That meal is not here.' and offers a way back to Today rather than a form seeded from nothing.
+- Failure: Condition: A meal detail is opened while the day log for another date is still being read. | Outcome: Retry | Observation: The detail opens anyway, because it is read by id and does not depend on the day log. If its own read fails it shows 'Cannot reach the server. Try again.' with a usable retry control.
 
 ### Acceptance supports
 - `tests/support/local-stack.ts`
@@ -648,9 +653,9 @@ Observation: From a meal, 'Log again' opens a new entry with only the foods and 
 
 Stimulus: Account A owns one dinner dated yesterday in local terms at 19:05: Chicken rice of type Mixed dish 250 g and Cucumber salad of type Vegetable 80 g, glucose before 110, glucose after 142, 6 units, exercise context 'After meal' and the note 'Ate slowly'. A browser at a 360 px viewport signs in, steps back one day, opens that dinner's card body, and uses 'Log again with these foods'. It reads the form as it arrives, then enters glucose before 145 and 7 units and saves.
 
-Expected: The form arrives titled for a new meal, naming its source as the same foods as yesterday's Dinner. It holds Chicken rice 'Mixed dish' 250 g and Cucumber salad 'Vegetable' 80 g. The slot is Dinner. Glucose before, the dose, the note and glucose after are all EMPTY, the exercise context is None, and the time is not 19:05. After saving, Today for TODAY shows a Dinner card with 'Chicken rice 250 g · Cucumber salad 80 g', '145' and '7 u' and no change. Stepping back one day still shows yesterday's Dinner with '110', '142', '+32' and '6 u', its note and context unchanged. Opening either meal lists 'Every time you ate this · 2'. The page never scrolls horizontally.
+Expected: The form arrives titled for a new meal, naming its source as the same foods as yesterday's Dinner. It holds Chicken rice 'Mixed dish' 250 g and Cucumber salad 'Vegetable' 80 g. The slot is Dinner. Glucose before, the dose, the note and glucose after are all EMPTY, the exercise context is None, and the time is not 19:05. After saving, Today for TODAY shows a Dinner card with 'Chicken rice 250 g · Cucumber salad 80 g', '145' and '7 u' and no change. Stepping back one day still shows yesterday's Dinner with '110', '142', '+32' and '6 u', its note and context unchanged. Opening either meal lists 'Every time you ate this · 2'. The page never scrolls horizontally. Opening the source meal after the repeat was saved shows its detail, with its note and its own readings, from whichever date is being read.
 
-Falsifier: A food, type, amount or unit is not copied, or anything besides the foods is carried over -- in particular a pre-filled dose, reading, note or the source's time -- or the exercise context does not start at None, or the new entry lands on yesterday instead of today, or the source meal's own values change in any way, or saving updates the source instead of creating a second record, or the two are not recognised as the same meal, or the document scrolls horizontally at a 360 px viewport.
+Falsifier: A food, type, amount or unit is not copied, or anything besides the foods is carried over -- in particular a pre-filled dose, reading, note or the source's time -- or the exercise context does not start at None, or the new entry lands on yesterday instead of today, or the source meal's own values change in any way, or saving updates the source instead of creating a second record, or the two are not recognised as the same meal, or the document scrolls horizontally at a 360 px viewport. It also fails if tapping a meal card leaves the person on the day log with no detail and no message.
 
 ### Oracle and verification
 Oracle target locator: `tests/acceptance/log-again.spec.ts`

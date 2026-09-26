@@ -7,7 +7,7 @@ import {
   type ExerciseContext,
   type MealSlot,
 } from '../domain/entry';
-import type { FoodDraft, MealDraft } from '../domain/meal-draft';
+import { repeatSourceText, type FoodDraft, type MealDraft } from '../domain/meal-draft';
 import type { ReadingChip } from '../domain/recent-readings';
 import { attachNumberPad, forgetOpenPad } from './number-pad';
 import { doseStepper } from './stepper';
@@ -353,6 +353,17 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
   const closePad = (): void => handlers.onClosePad?.();
 
   if (state.message !== null) screen.append(notice(state.message));
+
+  // A repeat names the meal it took its foods from, so a person cannot lose track
+  // of what they are logging again. It is a statement about this form, not a
+  // recorded value, so it carries no data-entry mark.
+  const copiedFrom = draft.copiedFrom ?? null;
+  if (copiedFrom !== null) {
+    const source = document.createElement('p');
+    source.className = 'form__source';
+    source.textContent = repeatSourceText(copiedFrom);
+    screen.append(source);
+  }
 
   screen.append(
     choiceGroup<MealSlot>(

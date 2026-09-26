@@ -9,6 +9,7 @@
 
 import {
   clockTime,
+  slotLabel,
   type AmountUnit,
   type ExerciseContext,
   type FoodPortion,
@@ -26,9 +27,25 @@ export type FoodDraft = {
   readonly unit: AmountUnit;
 };
 
+/**
+ * The meal a repeat took its foods from, kept so the form can name it. It is the
+ * source's identity for the reader and nothing more: no value of the source is
+ * ever written back, and a repeat is a new row with no id of its own yet.
+ */
+export type RepeatSource = {
+  readonly slot: MealSlot;
+  readonly eatenAt: Date;
+};
+
 export type MealDraft = {
   /** The row being updated, or null when this draft is a new meal. */
   readonly mealId: string | null;
+  /**
+   * The meal whose foods were copied into this draft, or null when the person
+   * started from an empty form. A draft with a source is still a NEW meal.
+   * Absent reads the same as null: most drafts are nobody's repeat.
+   */
+  readonly copiedFrom?: RepeatSource | null;
   /**
    * The date the meal is recorded against: the one the Today screen is reading,
    * never the server's, so a meal logged late at night lands on the day the
@@ -69,6 +86,7 @@ export const emptyFoodDraft: FoodDraft = {
 /** The time field opens on the current local clock time; the person may change it. */
 export const newMealDraft = (date: IsoDate, slot: MealSlot, now: Date = new Date()): MealDraft => ({
   mealId: null,
+  copiedFrom: null,
   date,
   slot,
   time: clockTime(now),
@@ -101,6 +119,7 @@ export const foodDraftFrom = (food: FoodPortion): FoodDraft => ({
  */
 export const mealDraftFrom = (meal: Meal, date: IsoDate): MealDraft => ({
   mealId: meal.id,
+  copiedFrom: null,
   date,
   slot: meal.slot,
   time: clockTime(meal.eatenAt),
@@ -111,6 +130,33 @@ export const mealDraftFrom = (meal: Meal, date: IsoDate): MealDraft => ({
   note: meal.note ?? '',
   foods: meal.foods.map(foodDraftFrom),
 });
+
+/**
+ * A meal's foods again, as a NEW draft. Only the foods travel -- each name, its
+ * type and its amount with its unit -- because the whole premise of the product
+ * is comparing two instances of the same composition, and a copy of the readings
+ * or the dose would make the second instance an echo of the first rather than a
+ * fresh observation. The dose above all starts empty: a dose offered as a
+ * starting value is a dose recommended however it is labelled.
+ *
+ * The slot comes across, because repeating a dinner almost always means another
+ * dinner and the person can still change it. The date is the one passed in --
+ * today, since repeating a meal is something done when eating it again -- and
+ * the time is the current clock.
+ */
+export const repeatMealDraft = (meal: Meal, date: IsoDate, now: Date = new Date()): MealDraft => ({
+  ...newMealDraft(date, meal.slot, now),
+  copiedFrom: { slot: meal.slot, eatenAt: meal.eatenAt },
+  foods: meal.foods.map(foodDraftFrom),
+});
+
+/** 'same foods as Thu 10 Sep · Dinner': what a repeat is a repeat of. */
+export const repeatSourceText = (source: RepeatSource): string =>
+  `same foods as ${source.eatenAt.toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })} · ${slotLabel(source.slot)}`;
 
 export const withFood = (draft: MealDraft, food: FoodDraft): MealDraft => ({
   ...draft,

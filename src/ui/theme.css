@@ -162,6 +162,24 @@ label {
   font-size: 0.9375rem;
 }
 
+/* The way into a repeat: a full-width quiet control, so it reads as an offer
+   below the meal rather than as the screen's own purpose. It wraps at 360 px
+   instead of widening the document. */
+.button--again {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  font-weight: 500;
+  white-space: normal;
+}
+
+/* 'same foods as Thu 10 Sep · Dinner': the form saying what it is a repeat of. */
+.form__source {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
 /* --------------------------------------------------------------- shell */
 
 .shell {
