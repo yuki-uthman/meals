@@ -5,15 +5,26 @@ import {
   type LookupResult,
   type LookupSummary,
 } from '../domain/food-lookup';
+import {
+  changeWindowLabel,
+  nearestView,
+  CHANGE_WINDOWS,
+  type ChangeWindow,
+} from '../domain/nearest-lookup';
 import type { MealInstance } from '../domain/meal-identity';
 
 // Looking back at the log by food: a search box, a summary of the meals that
 // matched, and those meals listed newest first, each one a way into its detail.
 //
 // The screen carries three tabs, because the canvas makes By food, By change and
-// By start one screen and a person moves between them. Only By food works in this
-// value: the other two are present but refused rather than pretending to work, so
-// nobody taps one and is told nothing.
+// By start one screen and a person moves between them. By food and By change both
+// work; By start is present but refused rather than pretending to work, so nobody
+// taps it and is told nothing.
+//
+// By change asks for a signed target and a window. The window is a TOLERANCE, not
+// a ranking: what it excludes is absent rather than listed last. Which meals it
+// admits, how far off each was and what order they come in are the domain's rules;
+// this only draws them, and a result is the SAME card a food lookup result is.
 //
 // The band on a change is published to the DOM BY NAME, as data-change-band, and
 // the stylesheet is the only thing that turns a name into a colour -- the same
@@ -32,11 +43,24 @@ export const LOOKUP_RESULTS_LABEL = 'Results';
  */
 export const LOOKUP_SEARCH_LABEL = 'Search past meals';
 
-/** The three tabs the canvas draws, and which of them this value built. */
-const TABS: readonly { readonly label: string; readonly ready: boolean }[] = [
-  { label: 'By food', ready: true },
-  { label: 'By change', ready: false },
-  { label: 'By start', ready: false },
+/**
+ * The target field's real name, drawn beside the field: the sign is part of what is
+ * asked for, so the field says outright what it takes.
+ */
+export const LOOKUP_TARGET_LABEL = 'Change wanted';
+
+/** Which way of looking back the person is on. */
+export type LookupTab = 'food' | 'change' | 'start';
+
+/** The three tabs the canvas draws, and which of them are built. */
+const TABS: readonly {
+  readonly tab: LookupTab;
+  readonly label: string;
+  readonly ready: boolean;
+}[] = [
+  { tab: 'food', label: 'By food', ready: true },
+  { tab: 'change', label: 'By change', ready: true },
+  { tab: 'start', label: 'By start', ready: false },
 ];
 
 /**
@@ -51,14 +75,24 @@ export type LookupState =
   | { readonly kind: 'loaded'; readonly meals: readonly MealInstance[] };
 
 export type LookupScreenView = {
-  /** What is typed. It is held outside the screen, so a redraw keeps it. */
+  /** Which tab is being looked at. Held outside the screen, like everything here. */
+  readonly tab: LookupTab;
+  /** What is typed in the search box. Held outside, so a redraw keeps it. */
   readonly query: string;
+  /** The target change as typed, signed, and the window it is asked within. */
+  readonly target: string;
+  readonly window: ChangeWindow;
   readonly state: LookupState;
 };
 
 export type LookupHandlers = {
   /** Records what was typed. It does NOT redraw the screen: see below. */
   readonly onQuery: (query: string) => void;
+  /** Records the target change. It does not redraw the screen either. */
+  readonly onTarget: (target: string) => void;
+  /** Choosing a tab or a window IS structural, so both redraw. */
+  readonly onTab: (tab: LookupTab) => void;
+  readonly onWindow: (bound: ChangeWindow) => void;
   readonly onOpen: (id: string) => void;
   readonly onRetry: () => void;
 };
@@ -70,18 +104,22 @@ const element = (tag: string, className: string, text?: string): HTMLElement => 
   return node;
 };
 
-const tabStrip = (): HTMLElement => {
+const tabStrip = (current: LookupTab, handlers: LookupHandlers): HTMLElement => {
   const strip = element('div', 'lookup__tabs');
   strip.setAttribute('role', 'tablist');
   strip.setAttribute('aria-label', 'How to look back');
 
   for (const tab of TABS) {
+    const on = tab.ready && tab.tab === current;
     const control = document.createElement('button');
-    control.className = tab.ready ? 'lookup__tab lookup__tab--on' : 'lookup__tab';
+    control.className = on ? 'lookup__tab lookup__tab--on' : 'lookup__tab';
     control.type = 'button';
     control.setAttribute('role', 'tab');
     control.textContent = tab.label;
-    control.setAttribute('aria-selected', String(tab.ready));
+    control.setAttribute('aria-selected', String(on));
+    if (tab.ready) {
+      control.addEventListener('click', () => handlers.onTab(tab.tab));
+    }
     if (!tab.ready) {
       // Present, and refused. A tab that is not built yet says so rather than
       // being tapped and doing nothing.
@@ -154,7 +192,10 @@ const readingsLine = (result: LookupResult): HTMLElement => {
  * through the port, exactly as a Today card and a History cell are, and its
  * accessible name says which meal it opens in words rather than by position.
  */
-const resultRow = (result: LookupResult, handlers: LookupHandlers): HTMLElement => {
+const resultRow = (
+  result: LookupResult & { readonly distance?: string },
+  handlers: LookupHandlers,
+): HTMLElement => {
   const row = document.createElement('li');
   row.className = 'result';
 
@@ -165,6 +206,14 @@ const resultRow = (result: LookupResult, handlers: LookupHandlers): HTMLElement 
 
   const head = element('p', 'result__when', `${result.date} · ${result.slot}`);
   open.append(head);
+  /**
+   * How far off the target it was, in words, and deliberately drawn ABOVE the
+   * readings rather than beside the change: a distance and a change are different
+   * statements, and putting them side by side would invite reading one as the other.
+   */
+  if (result.distance !== undefined) {
+    open.append(element('p', 'result__distance', result.distance));
+  }
   if (result.dose !== null) open.append(element('p', 'result__dose', result.dose));
   if (result.foods !== null) open.append(element('p', 'result__foods', result.foods));
   open.append(readingsLine(result));
@@ -175,7 +224,7 @@ const resultRow = (result: LookupResult, handlers: LookupHandlers): HTMLElement 
 };
 
 const resultsSection = (
-  results: readonly LookupResult[],
+  results: readonly (LookupResult & { readonly distance?: string })[],
   handlers: LookupHandlers,
 ): HTMLElement => {
   const region = document.createElement('section');
@@ -214,12 +263,96 @@ const panelFor = (
   return [summarySection(view.summary), resultsSection(view.results, handlers)];
 };
 
+/** Everything below the target field, for the target and the window in hand. */
+const changePanelFor = (
+  meals: readonly MealInstance[],
+  target: string,
+  bound: ChangeWindow,
+  handlers: LookupHandlers,
+): readonly HTMLElement[] => {
+  const view = nearestView(meals, target, bound);
+  if (view.kind !== 'found') return [resultsMessage(view.message)];
+  return [resultsSection(view.results, handlers)];
+};
+
+/**
+ * The three windows, as chips. Each says which bound it is, the chosen one says so
+ * to a screen reader as well as to the eye, and none of them is ever disabled: with
+ * nothing in the window, widening it is the move that finds something, so the chips
+ * must stay usable exactly when there are no results.
+ */
+const windowChips = (chosen: ChangeWindow, handlers: LookupHandlers): HTMLElement => {
+  const chips = element('div', 'lookup__windows');
+  chips.setAttribute('role', 'group');
+  chips.setAttribute('aria-label', 'Window');
+
+  for (const bound of CHANGE_WINDOWS) {
+    const on = bound === chosen;
+    const chip = document.createElement('button');
+    chip.className = on ? 'lookup__window lookup__window--on' : 'lookup__window';
+    chip.type = 'button';
+    chip.textContent = changeWindowLabel(bound);
+    chip.setAttribute('aria-pressed', String(on));
+    chip.addEventListener('click', () => handlers.onWindow(bound));
+    chips.append(chip);
+  }
+
+  return chips;
+};
+
+/**
+ * By change: the signed target, the window, and the meals nearest to it. Only this
+ * panel is redrawn as the target is typed, for the same reason the search box's is.
+ */
+const byChangeSection = (
+  meals: readonly MealInstance[],
+  view: LookupScreenView,
+  handlers: LookupHandlers,
+): HTMLElement => {
+  const section = element('div', 'lookup__by-change');
+
+  const field = document.createElement('input');
+  field.className = 'field__input lookup__field';
+  field.id = 'lookup-change-target';
+  // Deliberately a text field rather than a number one: the target is signed, and a
+  // number field on a phone keyboard hides the minus sign that makes '-20' askable.
+  field.type = 'text';
+  field.inputMode = 'text';
+  field.autocomplete = 'off';
+  field.value = view.target;
+
+  const label = document.createElement('label');
+  label.className = 'field__label';
+  label.setAttribute('for', field.id);
+  label.textContent = LOOKUP_TARGET_LABEL;
+
+  const asked = element('div', 'field');
+  asked.append(label, field);
+  section.append(asked, windowChips(view.window, handlers));
+
+  const panel = element('div', 'lookup__panel');
+  panel.append(...changePanelFor(meals, view.target, view.window, handlers));
+  section.append(panel);
+
+  // Typing redraws THIS PANEL and nothing else: rebuilding the screen on every
+  // keystroke would replace the very field being typed into and take the caret with
+  // it, and the window is arithmetic over meals already in hand. What was typed is
+  // recorded outside the screen, so a redraw for any other reason keeps it.
+  field.addEventListener('input', () => {
+    const typed = field.value;
+    handlers.onTarget(typed);
+    panel.replaceChildren(...changePanelFor(meals, typed, view.window, handlers));
+  });
+
+  return section;
+};
+
 export const lookupScreen = (
   view: LookupScreenView,
   handlers: LookupHandlers,
 ): HTMLElement => {
   const screen = element('div', 'lookup-screen');
-  screen.append(tabStrip());
+  screen.append(tabStrip(view.tab, handlers));
 
   if (view.state.kind === 'failed') {
     // Say why, and offer no search box at all: a box that cannot answer anything is
@@ -233,6 +366,11 @@ export const lookupScreen = (
     retry.textContent = 'Try again';
     retry.addEventListener('click', () => handlers.onRetry());
     screen.append(notice, retry);
+    return screen;
+  }
+
+  if (view.tab === 'change') {
+    screen.append(byChangeSection(view.state.meals, view, handlers));
     return screen;
   }
 

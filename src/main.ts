@@ -69,7 +69,8 @@ import { mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { historyScreen, type HistoryState } from './ui/history';
-import { lookupScreen, type LookupState } from './ui/lookup';
+import { lookupScreen, type LookupState, type LookupTab } from './ui/lookup';
+import { DEFAULT_CHANGE_WINDOW, type ChangeWindow } from './domain/nearest-lookup';
 import { shell, type ShellHandlers, type ShellTab } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
 
@@ -110,6 +111,15 @@ const start = (): void => {
   let lookupMeals: readonly MealInstance[] | null = null;
   let lookupQuery = '';
   let lookupMessage: string | null = null;
+  /**
+   * Which way of looking back is open, and what By change is asking: the signed
+   * target as typed and the window it is asked within. They live here for the same
+   * reason the query does -- the screen is a pure function of them -- and the window
+   * starts at plus or minus 5, which is the slack the design defaults to.
+   */
+  let lookupTab: LookupTab = 'food';
+  let lookupTarget = '';
+  let lookupWindow: ChangeWindow = DEFAULT_CHANGE_WINDOW;
   /** Guards against a slow read from an earlier account landing on a later one. */
   let lookupToken = 0;
 
@@ -360,7 +370,13 @@ const start = (): void => {
       { date, isToday: date === localToday(), heading: 'Lookup', tab: 'lookup' },
       dayHandlers,
       lookupScreen(
-        { query: lookupQuery, state: lookupSectionState() },
+        {
+          tab: lookupTab,
+          query: lookupQuery,
+          target: lookupTarget,
+          window: lookupWindow,
+          state: lookupSectionState(),
+        },
         {
           // Recorded and deliberately NOT re-rendered here: the screen redraws its
           // own results below the field, because rebuilding the whole screen on a
@@ -368,6 +384,21 @@ const start = (): void => {
           // what lets a redraw for any other reason keep what was typed.
           onQuery: (query) => {
             lookupQuery = query;
+          },
+          // The target is recorded and not re-rendered, for exactly the reason the
+          // query is: the panel below the field redraws itself.
+          onTarget: (target) => {
+            lookupTarget = target;
+          },
+          // A tab and a window are structural, so both redraw -- over meals already
+          // in hand, never another read.
+          onTab: (tab) => {
+            lookupTab = tab;
+            render();
+          },
+          onWindow: (bound) => {
+            lookupWindow = bound;
+            render();
           },
           onOpen: (id) => void openMealDetail(id),
           onRetry: () => void retryLookup(),
@@ -517,6 +548,9 @@ const start = (): void => {
     // A fresh search each time the section is opened: coming back to Lookup asks
     // what the person is looking for now, rather than answering an older question.
     lookupQuery = '';
+    lookupTab = 'food';
+    lookupTarget = '';
+    lookupWindow = DEFAULT_CHANGE_WINDOW;
     lookupMeals = null;
     lookupMessage = null;
     if (!(await loadLookup())) return;
@@ -948,6 +982,9 @@ const start = (): void => {
     lookupMeals = null;
     lookupMessage = null;
     lookupQuery = '';
+    lookupTab = 'food';
+    lookupTarget = '';
+    lookupWindow = DEFAULT_CHANGE_WINDOW;
     signInState = { ...emptySignInState, message };
     render();
   };
@@ -1022,6 +1059,9 @@ const start = (): void => {
     lookupMeals = null;
     lookupMessage = null;
     lookupQuery = '';
+    lookupTab = 'food';
+    lookupTarget = '';
+    lookupWindow = DEFAULT_CHANGE_WINDOW;
     if (account === null) {
       render();
       return;

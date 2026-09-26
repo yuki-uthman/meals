@@ -1318,3 +1318,54 @@ label {
 .result__change {
   font-weight: 600;
 }
+
+/* ----------------------------------------------------- lookup by change */
+
+.lookup__by-change {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The three windows, wrapping rather than scrolling, so nothing here can push the
+   document sideways at 360 px. */
+.lookup__windows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.lookup__window {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+/* The chosen window. The fill says it to the eye; aria-pressed says it to everyone
+   else, so the choice is never carried by colour alone. */
+.lookup__window--on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* How far off the target the meal was. It is furniture beside the readings, and
+   pointedly carries NO band colour: a distance is not a change, and colouring it
+   like one would invite reading it as another change. */
+.result__distance {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
