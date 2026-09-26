@@ -9,7 +9,7 @@ import {
 } from '../domain/entry';
 import type { FoodDraft, MealDraft } from '../domain/meal-draft';
 import type { ReadingChip } from '../domain/recent-readings';
-import { numberPad } from './number-pad';
+import { attachNumberPad, forgetOpenPad } from './number-pad';
 import { doseStepper } from './stepper';
 
 // The New meal and Edit meal screen, as a pure function from a draft to a DOM
@@ -119,25 +119,22 @@ export const numberField = (
   input.value = value;
   input.addEventListener('input', () => onInput(input.value));
 
-  const { pad } = controls;
-  if (pad !== undefined) {
-    const open = (): void => {
-      if (!pad.isOpen) pad.onOpen();
-    };
-    // Tapping the field opens the pad, and so does reaching it with a keyboard:
-    // arriving at the field is what asks for a way to fill it in.
-    input.addEventListener('click', open);
-    input.addEventListener('focus', open);
-  }
-
   wrapper.append(
     fieldLabel(id, labelText),
     controls.stepper === true ? doseStepper(input, onInput) : input,
   );
 
-  if (pad !== undefined && pad.isOpen) {
-    wrapper.append(
-      numberPad(input, pad.chips, { onValue: onInput, onDone: () => pad.onClose() }),
+  const { pad } = controls;
+  if (pad !== undefined) {
+    // The pad is mounted and unmounted beside this input rather than by redrawing
+    // the screen. Opening it must not replace, reset or detach the field: a
+    // re-render on focus would eat a hardware-keyboard user's first keystroke.
+    attachNumberPad(
+      wrapper,
+      input,
+      pad.chips,
+      { onValue: onInput, onOpened: () => pad.onOpen(), onClosed: () => pad.onClose() },
+      pad.isOpen,
     );
   }
 
@@ -234,6 +231,9 @@ export const notice = (message: string): HTMLElement => {
 };
 
 export const formScreen = (className: string): HTMLElement => {
+  // A fresh form screen has no pad open yet, and any pad from the screen it
+  // replaces went with that screen's DOM.
+  forgetOpenPad();
   const screen = document.createElement('div');
   screen.className = `form ${className}`;
   return screen;

@@ -143,13 +143,14 @@ const start = (): void => {
       mealForm(
         { draft, padTarget, chips: mealChips(draft), message: formMessage },
         {
+          // Opening and closing the pad is a change to the field's own corner of
+          // the screen, so it is recorded here and deliberately NOT re-rendered:
+          // redrawing would replace the very input the pad writes into.
           onOpenPad: (target) => {
             padTarget = target;
-            render();
           },
           onClosePad: () => {
             padTarget = null;
-            render();
           },
           onSlot: (slot) => patchMeal({ slot }),
           onTime: (time) => patchMeal({ time }),
@@ -196,13 +197,12 @@ const start = (): void => {
           message: formMessage,
         },
         {
+          // Recorded, not re-rendered, for the same reason as the meal screen's.
           onOpenPad: () => {
             nightPadOpen = true;
-            render();
           },
           onClosePad: () => {
             nightPadOpen = false;
-            render();
           },
           onUnits: (units) => patchNight({ units }),
           onTakenAt: (takenAt) => patchNight({ takenAt }),

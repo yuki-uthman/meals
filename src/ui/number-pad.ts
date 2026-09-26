@@ -93,3 +93,69 @@ export const numberPad = (
 
   return pad;
 };
+
+// --------------------------------------------------- opening and closing in place
+//
+// Opening the pad mounts it beside the field and closing it takes it away again.
+// Neither touches the input: it is never rebuilt, never reset and never detached,
+// so a value already in the field survives being focused and a hardware-keyboard
+// user's first keystroke is not eaten. That is why this is a local DOM change and
+// not a redraw of the screen -- a redraw would replace the very node the person is
+// typing into, breaking this value's oracle and record-a-meal's along with it.
+
+/** One pad at a time on the whole screen: a second one would have two displays. */
+let current: { readonly close: () => void } | null = null;
+
+/** Forgets a pad left behind on a screen that has since been replaced. */
+export const forgetOpenPad = (): void => {
+  current = null;
+};
+
+export type AttachedPadHandlers = {
+  /** The field's value changed under the pad's keys. */
+  readonly onValue: (value: string) => void;
+  /** The pad is now open on this field, so the app can say so elsewhere. */
+  readonly onOpened: () => void;
+  /** The pad has gone. The value stays exactly where the person left it. */
+  readonly onClosed: () => void;
+};
+
+/**
+ * Gives one glucose field its pad. Tapping the field opens it, and so does
+ * reaching it with a keyboard: arriving at the field is what asks for a way to
+ * fill it in.
+ */
+export const attachNumberPad = (
+  wrapper: HTMLElement,
+  field: HTMLInputElement,
+  chips: readonly ReadingChip[],
+  handlers: AttachedPadHandlers,
+  initiallyOpen = false,
+): void => {
+  let mounted: HTMLElement | null = null;
+
+  const close = (): void => {
+    if (mounted === null) return;
+    mounted.remove();
+    mounted = null;
+    if (current !== null && current.close === close) current = null;
+    handlers.onClosed();
+  };
+
+  const open = (): void => {
+    if (mounted !== null) return;
+    // Another field's pad gives way rather than sitting open beside this one.
+    current?.close();
+    mounted = numberPad(field, chips, { onValue: handlers.onValue, onDone: close });
+    wrapper.append(mounted);
+    current = { close };
+    handlers.onOpened();
+  };
+
+  field.addEventListener('click', open);
+  field.addEventListener('focus', open);
+
+  // A redraw for some other reason -- a refusal to show, a food added -- must not
+  // take an open pad away with it.
+  if (initiallyOpen) open();
+};
