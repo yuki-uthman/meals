@@ -896,3 +896,202 @@ label {
   line-height: 1;
   cursor: pointer;
 }
+
+/* The bottom navigation: the two sections built so far, side by side and each
+   taking half the width, so it is fluid at 360 px like everything else. */
+.shell__nav {
+  display: flex;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.nav__entry {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.nav__entry--on {
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+/* The two choosers. They wrap rather than scroll, because nothing on this page
+   is allowed to push the document sideways. */
+.history__views,
+.history__periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.history__view,
+.history__period {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.history__view--on,
+.history__period--on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.history {
+  padding: 0 var(--space-2);
+}
+
+/* Four columns plus the day label at 360 px with no horizontal scrolling: the
+   table is fixed, so the columns divide the width that is there rather than
+   being sized by their contents. */
+.history__grid {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.history__corner,
+.history__header {
+  padding: var(--space-1);
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.history__corner {
+  width: 3.5rem;
+}
+
+.history__day {
+  width: 3.5rem;
+  padding: var(--space-1);
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.history__cell {
+  padding: 1px;
+}
+
+/* A cell with nothing behind it: an outline and nothing else. */
+.history__cell--empty::after {
+  content: '';
+  display: block;
+  height: 2rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--space-1);
+}
+
+.history__tap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--space-1);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.1;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+/* Both shows two numbers in one cell, so they take a smaller size rather than
+   the grid being allowed to overflow. */
+.history__tap--pair {
+  font-size: 0.6875rem;
+}
+
+.history__caption {
+  margin: var(--space-3) 0 0;
+  padding: 0 var(--space-3);
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+.history__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-5);
+  padding: 0 var(--space-3);
+  list-style: none;
+}
+
+.history__swatch {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: var(--space-1);
+  color: var(--accent-ink);
+  font-size: 0.6875rem;
+}
+
+/* The bands, by name. The stylesheet is the only thing that knows a colour;
+   nothing above it does. */
+.history__tap[data-level-band='low'],
+.history__swatch[data-level-band='low'] {
+  background: var(--band-low);
+}
+
+.history__tap[data-level-band='in-range'],
+.history__swatch[data-level-band='in-range'] {
+  background: var(--band-in-range);
+}
+
+.history__tap[data-level-band='high'],
+.history__swatch[data-level-band='high'] {
+  background: var(--band-high);
+}
+
+.history__tap[data-level-band='very-high'],
+.history__swatch[data-level-band='very-high'] {
+  background: var(--band-very-high);
+}
+
+.history__tap[data-change-band='dropped'],
+.history__swatch[data-change-band='dropped'] {
+  background: var(--band-dropped);
+}
+
+.history__tap[data-change-band='stable'],
+.history__swatch[data-change-band='stable'] {
+  background: var(--band-stable);
+}
+
+.history__tap[data-change-band='rose'],
+.history__swatch[data-change-band='rose'] {
+  background: var(--band-rose);
+}
+
+.history__tap[data-change-band='rose-high'],
+.history__swatch[data-change-band='rose-high'] {
+  background: var(--band-rose-high);
+}

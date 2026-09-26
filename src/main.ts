@@ -22,6 +22,16 @@ import {
   type Meal,
   type MealSlot,
 } from './domain/entry';
+import {
+  historyDates,
+  historyPeriod,
+  historyRows,
+  DEFAULT_HISTORY_PERIOD,
+  LONGEST_HISTORY_DAYS,
+  type HistoryPeriodKey,
+  type HistoryView,
+  type HistoryWindow,
+} from './domain/history';
 import { instancesOf, type InstanceRow, type MealInstance } from './domain/meal-identity';
 import {
   emptyFoodDraft,
@@ -58,7 +68,8 @@ import { FOOD_FORM_TITLE, foodForm } from './ui/food-form';
 import { mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
-import { shell, type ShellHandlers } from './ui/shell';
+import { historyScreen, type HistoryState } from './ui/history';
+import { shell, type ShellHandlers, type ShellTab } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
 
 const mount = (): HTMLElement => {
@@ -86,7 +97,22 @@ const start = (): void => {
   let readToken = 0;
 
   /** Which screen the signed-in person is on. Today unless a meal is being filled in. */
-  let screen: 'day' | 'meal' | 'food' | 'night' | 'detail' = 'day';
+  let screen: 'day' | 'meal' | 'food' | 'night' | 'detail' | 'history' = 'day';
+
+  /**
+   * The History grid. The whole of the longest period is read once and the
+   * chosen period bounds what is DRAWN, so switching the view or the period is a
+   * redraw of material already in hand rather than another read. The read is
+   * still bounded: an unbounded grid is exactly what the period exists to stop.
+   */
+  let historyWindow: HistoryWindow | null = null;
+  /** The date the grid's rows are counted back from, fixed when the read landed. */
+  let historyToday: IsoDate = localToday();
+  let historyMessage: string | null = null;
+  let historyView: HistoryView = 'before';
+  let historyPeriodKey: HistoryPeriodKey = DEFAULT_HISTORY_PERIOD;
+  /** Guards against a slow grid read from an earlier account landing on a later one. */
+  let historyToken = 0;
   /**
    * The meal being looked at, and every instance of its foods. Both are held
    * here rather than in the screen, for the same reason a draft is: the screen
@@ -135,11 +161,12 @@ const start = (): void => {
     onSignOut: () => void signOut(),
     onPreviousDay: () => moveDay(-1),
     onNextDay: () => moveDay(1),
+    onNavigate: (tab) => goTo(tab),
   };
 
   const todayScreen = (): HTMLElement =>
     shell(
-      { date, isToday: date === localToday() },
+      { date, isToday: date === localToday(), tab: 'today' },
       dayHandlers,
       dayLogSection(dayLogState, {
         onRetry: () => void loadDayLog(),
@@ -263,10 +290,52 @@ const start = (): void => {
       ),
     );
 
+  /**
+   * The grid as the screen reads it. Which reading lands in which column and
+   * which band it falls in is the domain's rule; this only says which of the
+   * three states the section is in.
+   */
+  const historySectionState = (): HistoryState => {
+    if (historyMessage !== null) return { kind: 'failed', message: historyMessage };
+    if (historyWindow === null) return { kind: 'loading' };
+    const dates = historyDates(historyToday, historyPeriod(historyPeriodKey).days);
+    return { kind: 'loaded', rows: historyRows(historyWindow, dates, historyView) };
+  };
+
+  const historySection = (): HTMLElement =>
+    shell(
+      { date, isToday: date === localToday(), heading: 'History', tab: 'history' },
+      dayHandlers,
+      historyScreen(
+        { view: historyView, period: historyPeriodKey, state: historySectionState() },
+        {
+          // The view and the period bound and colour what is already in hand, so
+          // choosing one is a redraw and never another read.
+          onView: (next) => {
+            historyView = next;
+            render();
+          },
+          onPeriod: (next) => {
+            historyPeriodKey = next;
+            render();
+          },
+          onOpen: (target) => {
+            if (target.kind === 'meal') {
+              void openMealDetail(target.id);
+              return;
+            }
+            void openNightFor(target.nightOn);
+          },
+          onRetry: () => void loadHistory(),
+        },
+      ),
+    );
+
   const signedInScreen = (): HTMLElement => {
     if (screen === 'night' && nightDraft !== null && nightHistory !== null) {
       return nightScreen(nightDraft, nightHistory);
     }
+    if (screen === 'history') return historySection();
     if (screen === 'detail' && detailRefusal !== null) return missingScreen(detailRefusal);
     if (screen === 'detail' && detailMeal !== null) return detailScreen(detailMeal);
     if (screen === 'food' && foodDraft !== null) return foodScreen(foodDraft);
@@ -307,6 +376,105 @@ const start = (): void => {
    * the draft, id and all, so saving updates that night rather than adding a
    * second one. The five nights are read before the screen is shown.
    */
+  /**
+   * The grid's material: every meal and night of the longest period, read
+   * through the port with no account identifier anywhere, so row-level security
+   * is the only thing that decides whose readings can appear in it.
+   */
+  const loadHistory = async (): Promise<void> => {
+    const token = ++historyToken;
+    historyMessage = null;
+    historyToday = localToday();
+    // The window in hand is deliberately kept while the read is in flight: it
+    // belongs to this same account and coming back to History must not blank the
+    // grid. It is replaced by what the store returns, never merged with it, so
+    // nothing stale can survive the read. Only an account change clears it.
+    render();
+
+    const from = shiftDate(historyToday, -(LONGEST_HISTORY_DAYS - 1));
+    const outcome = await logStore.historyWindow(from, historyToday);
+    if (token !== historyToken) return;
+
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return;
+    }
+    if (outcome.kind === 'retry') {
+      // No grid at all rather than a stale one, and it says why.
+      historyMessage = outcome.message;
+      render();
+      return;
+    }
+
+    historyWindow = outcome.window;
+    render();
+  };
+
+  const openHistorySection = async (): Promise<void> => {
+    clearDetail();
+    mealDraft = null;
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
+    screen = 'history';
+    await loadHistory();
+  };
+
+  /** The bottom navigation: the two sections this brief has built so far. */
+  const goTo = (tab: ShellTab): void => {
+    if (tab === 'history') {
+      void openHistorySection();
+      return;
+    }
+    clearDetail();
+    mealDraft = null;
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
+    screen = 'day';
+    date = localToday();
+    void loadDayLog();
+  };
+
+  /**
+   * A night cell opens the night screen for ITS OWN night, which is the record
+   * dated the day before the row it sits in. The date being read moves with it,
+   * because the night screen records against the date the frame is on, and the
+   * day is read first so the screen opens on the night already there rather than
+   * on a blank one that would overwrite it.
+   */
+  const openNightFor = async (nightOn: IsoDate): Promise<void> => {
+    const outcome = await logStore.dayLog(nightOn);
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return;
+    }
+
+    // An in-flight day read for another date must not land on top of this one.
+    readToken += 1;
+    date = nightOn;
+
+    if (outcome.kind !== 'loaded') {
+      // Say so rather than returning quietly: a control that opens nothing
+      // cannot be told from a missed tap.
+      clearDetail();
+      dayLogState = { kind: 'failed', message: outcome.message };
+      screen = 'day';
+      render();
+      return;
+    }
+
+    clearDetail();
+    dayLogState = { kind: 'loaded', log: outcome.log };
+    await openNight();
+  };
+
   const openNight = async (): Promise<void> => {
     if (dayLogState.kind !== 'loaded') return;
     const recordedNight = dayLogState.log.nightInsulin[0];
@@ -663,6 +831,12 @@ const start = (): void => {
     // based on another account's meal.
     mealHistory = [];
     mealHistoryMessage = null;
+    // A grid is made of the account's own readings, so it goes with the account.
+    historyToken += 1;
+    historyWindow = null;
+    historyMessage = null;
+    historyView = 'before';
+    historyPeriodKey = DEFAULT_HISTORY_PERIOD;
     signInState = { ...emptySignInState, message };
     render();
   };
@@ -726,6 +900,12 @@ const start = (): void => {
     // The same goes for the history an estimate would be built from.
     mealHistory = [];
     mealHistoryMessage = null;
+    // And for the grid: it may never hold a reading of the previous account's.
+    historyToken += 1;
+    historyWindow = null;
+    historyMessage = null;
+    historyView = 'before';
+    historyPeriodKey = DEFAULT_HISTORY_PERIOD;
     if (account === null) {
       render();
       return;

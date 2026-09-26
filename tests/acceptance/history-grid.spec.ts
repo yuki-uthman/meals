@@ -392,19 +392,50 @@ const allRows = async (page: Page): Promise<Locator> => {
   return grid(page).getByRole('listitem');
 };
 
-/** The day rows: the ones whose label names a weekday. A header row names none. */
-const dayRows = async (page: Page): Promise<Locator> =>
-  (await allRows(page)).filter({ hasText: /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/ });
+const WEEKDAY = /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/;
 
 const dayLabel = (daysAgo: number): RegExp => {
   const day = startOfLocalDay(daysAgo);
   return new RegExp(`(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\\w*\\s*0?${day.getDate()}\\b`, 'i');
 };
 
+/**
+ * A row is identified by its DAY LABEL CELL and never by the row's whole text. A row's text
+ * is the concatenation of its cells with no separator between them, so a row reading
+ * 'Sat 26' followed by a cell reading 260 has the text 'Sat 26260...', in which the label
+ * cannot be matched at all. The label cell's own accessible name is just the label, so
+ * matching it is both correct and independent of what the readings happen to be.
+ *
+ * Whether the grid is a table or a list is still a presentation choice: a table exposes the
+ * label as a row header, and a list is matched on the label cell it exposes instead.
+ */
+const labelCell = (page: Page, name: RegExp): Locator => page.getByRole('rowheader', { name });
+
+/** The day rows: the ones whose label names a weekday. A header row carries none. */
+const dayRows = async (page: Page): Promise<Locator> => {
+  const rows = await allRows(page);
+  if ((await labelCell(page, WEEKDAY).count()) > 0) {
+    return rows.filter({ has: labelCell(page, WEEKDAY) });
+  }
+  // A list has no row headers; its label is its own first line, which innerText separates.
+  return rows.filter({ hasText: WEEKDAY });
+};
+
 const rowFor = async (page: Page, daysAgo: number): Promise<Locator> => {
-  const matching = (await dayRows(page)).filter({ hasText: dayLabel(daysAgo) });
+  const label = dayLabel(daysAgo);
+  const rows = await allRows(page);
+  const matching =
+    (await labelCell(page, WEEKDAY).count()) > 0
+      ? rows.filter({ has: labelCell(page, label) })
+      : (await dayRows(page)).filter({ hasText: label });
   await expect(matching, `exactly one row for ${daysAgo} day(s) ago`).toHaveCount(1);
   return matching.first();
+};
+
+/** One row's day label cell: the row header where there is one, else the row itself. */
+const labelOf = async (row: Locator): Promise<Locator> => {
+  const header = row.getByRole('rowheader');
+  return (await header.count()) > 0 ? header.first() : row;
 };
 
 /**
@@ -525,9 +556,11 @@ const assertCell = async (
 const assertEmptyRows = async (page: Page): Promise<void> => {
   for (const daysAgo of EMPTY_ROW_DAYS_AGO) {
     const row = await rowFor(page, daysAgo);
-    const text = await textOf(row);
     // The day label is the only thing in it: no readings, no bands, nothing to tap.
-    expect(text, `the row ${daysAgo} day(s) ago names its date`).toMatch(dayLabel(daysAgo));
+    expect(
+      await textOf(await labelOf(row)),
+      `the row ${daysAgo} day(s) ago names its date`,
+    ).toMatch(dayLabel(daysAgo));
     await expect(row.locator('[data-level-band]')).toHaveCount(0);
     await expect(row.locator('[data-change-band]')).toHaveCount(0);
     expect(await controlCount(row), `the empty row ${daysAgo} day(s) ago offers no control`).toBe(0);
@@ -558,13 +591,16 @@ test('the grid opens on Before: one row per day, four chronological columns, col
     DEFAULT_ROWS,
   );
 
-  // Newest first.
-  expect(await textOf((await dayRows(phone)).first()), 'the newest date is first').toMatch(
-    dayLabel(0),
-  );
-  expect(await textOf((await dayRows(phone)).last()), 'the oldest date is last').toMatch(
-    dayLabel(DEFAULT_ROWS - 1),
-  );
+  // Newest first. Read off each row's LABEL, not its whole text, which runs the label
+  // into the first reading.
+  expect(
+    await textOf(await labelOf((await dayRows(phone)).first())),
+    'the newest date is first',
+  ).toMatch(dayLabel(0));
+  expect(
+    await textOf(await labelOf((await dayRows(phone)).last())),
+    'the oldest date is last',
+  ).toMatch(dayLabel(DEFAULT_ROWS - 1));
 
   // The columns, left to right: the night half that is being shown, then the day's meals.
   const gridText = await textOf(grid(phone));

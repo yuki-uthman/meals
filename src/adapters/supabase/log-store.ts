@@ -4,6 +4,7 @@ import {
   MEAL_NOT_HERE,
   MEAL_NOT_SAVED,
   type DayLogOutcome,
+  type HistoryWindowOutcome,
   type LogStore,
   type MealHistoryOutcome,
   type MealOutcome,
@@ -336,6 +337,12 @@ const toHistoryFailure = (error: PostgrestError, status: number): MealHistoryOut
     ? { kind: 'session-ended', message: SESSION_ENDED }
     : { kind: 'retry', message: UNREACHABLE_SERVER };
 
+/** And for the History grid's read, read exactly the same way. */
+const toHistoryWindowFailure = (error: PostgrestError, status: number): HistoryWindowOutcome =>
+  isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+
 /** And for the single-meal read, read exactly the same way. */
 const toMealFailure = (error: PostgrestError, status: number): MealOutcome =>
   isSessionGone(error, status)
@@ -479,6 +486,49 @@ export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
         mornings: ((mealResult.data ?? []) as MorningRow[]).map(toMorningMeal),
       };
       return { kind: 'loaded', window };
+    } catch {
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
+  historyWindow: async (from: IsoDate, to: IsoDate): Promise<HistoryWindowOutcome> => {
+    try {
+      // No user_id filter here either: row-level security is the only thing that
+      // scopes this read, so a grid can never contain another account's
+      // readings. Both reads select on the date column and never on the
+      // timestamp, so a late row stays on the day its writer meant.
+      //
+      // The nights reach back one further date than the meals, because the night
+      // in a row is the one dated the day BEFORE that row.
+      const [mealResult, nightResult] = await Promise.all([
+        client
+          .from('meals')
+          .select(RECENT_MEAL_SELECT)
+          .gte('eaten_on', from)
+          .lte('eaten_on', to)
+          .order('eaten_at', { ascending: true }),
+        client
+          .from('night_insulin')
+          .select(NIGHT_SELECT)
+          .gte('night_on', shiftDate(from, -1))
+          .lte('night_on', to)
+          .order('night_on', { ascending: false }),
+      ]);
+
+      if (mealResult.error !== null) {
+        return toHistoryWindowFailure(mealResult.error, mealResult.status);
+      }
+      if (nightResult.error !== null) {
+        return toHistoryWindowFailure(nightResult.error, nightResult.status);
+      }
+
+      return {
+        kind: 'loaded',
+        window: {
+          meals: ((mealResult.data ?? []) as RecentMealRow[]).map(toRecentMeal),
+          nights: ((nightResult.data ?? []) as NightRow[]).map(toNightInsulin),
+        },
+      };
     } catch {
       return { kind: 'retry', message: UNREACHABLE_SERVER };
     }

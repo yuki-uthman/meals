@@ -3,6 +3,7 @@ import type { MealRecording } from '../domain/meal-draft';
 import type { NightRecording, NightWindow } from '../domain/night';
 import type { MealInstance } from '../domain/meal-identity';
 import type { RecentMeal } from '../domain/recent-readings';
+import type { HistoryWindow } from '../domain/history';
 
 // Reading the signed-in account's own entries for one date, and recording a meal.
 //
@@ -83,8 +84,23 @@ export type MealHistoryOutcome =
   | { readonly kind: 'retry'; readonly message: string }
   | { readonly kind: 'session-ended'; readonly message: string };
 
+export type HistoryWindowOutcome =
+  | { readonly kind: 'loaded'; readonly window: HistoryWindow }
+  /** The server could not be reached. Show no grid rather than a stale one. */
+  | { readonly kind: 'retry'; readonly message: string }
+  | { readonly kind: 'session-ended'; readonly message: string };
+
 export type LogStore = {
   dayLog: (date: IsoDate) => Promise<DayLogOutcome>;
+  /**
+   * Everything the History grid is read from, for the dates `from` to `to`
+   * inclusive: the meals on those dates, and the nights that led into them --
+   * which are the nights dated from the day BEFORE `from`. Which reading lands
+   * in which column, and which band it falls in, is the domain's rule and not
+   * this query's, so the whole range comes back and nothing about the grid is
+   * decided in SQL.
+   */
+  historyWindow: (from: IsoDate, to: IsoDate) => Promise<HistoryWindowOutcome>;
   /**
    * One meal with its foods, BY ITS ID. A detail is opened through this read
    * and never by looking the meal up in whatever day log happens to be loaded:

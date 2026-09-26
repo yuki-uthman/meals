@@ -11,8 +11,19 @@ export type FormFrame = {
   readonly busy: boolean;
 };
 
+/** The sections the bottom navigation carries. Lookup joins them at value 10. */
+export type ShellTab = 'today' | 'history';
+
 export type ShellState = {
   readonly date: IsoDate;
+  /**
+   * A section that is not the day being read, such as History. When it is set
+   * the header says the section rather than the date, and the day stepper is
+   * absent, because stepping a day means nothing outside the day log.
+   */
+  readonly heading?: string | undefined;
+  /** Which navigation entry the person is on, so the frame can say so. */
+  readonly tab?: ShellTab | undefined;
   /** Whether the date being read is the reader's own today. */
   readonly isToday: boolean;
   /**
@@ -30,7 +41,17 @@ export type ShellHandlers = {
   /** Used only by a form frame: leave without writing, and write. */
   readonly onCancel?: (() => void) | undefined;
   readonly onSave?: (() => void) | undefined;
+  /**
+   * Moving between the sections. Present on the reading screens and absent on a
+   * form: leaving a half-filled meal by tapping a section would throw it away.
+   */
+  readonly onNavigate?: ((tab: ShellTab) => void) | undefined;
 };
+
+const NAV_ENTRIES: readonly (readonly [ShellTab, string])[] = [
+  ['today', 'Today'],
+  ['history', 'History'],
+];
 
 const localDate = (date: IsoDate): Date => {
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];
@@ -118,6 +139,47 @@ const formControls = (form: FormFrame, handlers: ShellHandlers): HTMLElement => 
   return controls;
 };
 
+/**
+ * A section other than the day log: there is no day to step, so the frame
+ * carries the way out and nothing else.
+ */
+const sectionControls = (handlers: ShellHandlers): HTMLElement => {
+  const controls = controlBar();
+
+  const signOut = document.createElement('button');
+  signOut.className = 'button button--quiet';
+  signOut.type = 'button';
+  signOut.textContent = 'Sign out';
+  signOut.addEventListener('click', () => handlers.onSignOut());
+
+  controls.append(signOut);
+  return controls;
+};
+
+/**
+ * The bottom navigation: Today and History, and nothing else. Lookup arrives at
+ * value 10 and Settings is in no value of this brief, so neither is here.
+ */
+const bottomNavigation = (state: ShellState, handlers: ShellHandlers): HTMLElement => {
+  const nav = document.createElement('nav');
+  nav.className = 'shell__nav';
+  nav.setAttribute('aria-label', 'Sections');
+
+  for (const [tab, label] of NAV_ENTRIES) {
+    const entry = document.createElement('button');
+    entry.className = state.tab === tab ? 'nav__entry nav__entry--on' : 'nav__entry';
+    entry.type = 'button';
+    entry.textContent = label;
+    // The section being read says so to a screen reader rather than only by
+    // being painted differently.
+    if (state.tab === tab) entry.setAttribute('aria-current', 'page');
+    entry.addEventListener('click', () => handlers.onNavigate?.(tab));
+    nav.append(entry);
+  }
+
+  return nav;
+};
+
 export const shell = (
   state: ShellState,
   handlers: ShellHandlers,
@@ -132,18 +194,28 @@ export const shell = (
   const day = document.createElement('div');
   day.className = 'shell__day';
 
-  const weekday = document.createElement('p');
-  weekday.className = 'shell__weekday';
-  weekday.textContent = dateHeading(state.date);
-
   const title = document.createElement('h1');
   title.className = 'shell__title';
-  title.textContent = state.form?.title ?? screenHeading(state.date, state.isToday);
+  title.textContent =
+    state.form?.title ?? state.heading ?? screenHeading(state.date, state.isToday);
 
-  day.append(weekday, title);
+  // The quiet date line belongs to the day being read. A section such as History
+  // is not one date, so saying one above its heading would be a small untruth.
+  if (state.form === undefined && state.heading !== undefined) {
+    day.append(title);
+  } else {
+    const weekday = document.createElement('p');
+    weekday.className = 'shell__weekday';
+    weekday.textContent = dateHeading(state.date);
+    day.append(weekday, title);
+  }
 
   const controls =
-    state.form === undefined ? dayControls(state, handlers) : formControls(state.form, handlers);
+    state.form !== undefined
+      ? formControls(state.form, handlers)
+      : state.heading === undefined
+        ? dayControls(state, handlers)
+        : sectionControls(handlers);
 
   header.append(day, controls);
 
@@ -152,5 +224,12 @@ export const shell = (
   main.append(content);
 
   frame.append(header, main);
+
+  // No navigation on a form: the way out of one is Cancel or Save, and both say
+  // what happens to what has been filled in.
+  if (state.form === undefined && handlers.onNavigate !== undefined) {
+    frame.append(bottomNavigation(state, handlers));
+  }
+
   return frame;
 };
