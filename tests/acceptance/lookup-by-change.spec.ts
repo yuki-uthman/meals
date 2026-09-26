@@ -27,7 +27,9 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    listed with an empty distance.
  *  - The order is by distance, nearest first, ties broken by date, newer first. The fixture has
  *    no tie at +20, so the tie-break is falsified separately at a target of +21, where the +20
- *    meal and the +22 meal are both 1 off and the newer of the two must come first.
+ *    meal and the +22 meal are both 1 off and the newer of the two must come first. That case
+ *    chooses the ±2 window, because at +21 the +17 meal is 4 off and a tolerance of ±5 would
+ *    have to list it: a case asserting an exact row count states the window it means.
  *  - A distance reads in WORDS: 'exact' for a change equal to the target, otherwise '3 off'.
  *    Zero distance is a different statement from a distance of zero units, so '0 off' fails,
  *    and a signed distance fails, because it would read as another change.
@@ -37,7 +39,9 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    window, not the target -- and leaves the chips usable, so widening is one tap away.
  *
  * Bands are asserted by NAME and never by colour. Widgets are located tolerantly: whether a
- * chip is a radio, a tab or a button, and how a date is worded, are presentation choices. The
+ * window chip is a radio or a button, and how a date is worded, are presentation choices. The
+ * lookup TABS are not tolerated in that way: they are a tablist, so they are matched as tabs and
+ * their current one asserted through aria-selected, while a chip's through aria-pressed. The
  * window, the distances, the order and the bands are not.
  */
 
@@ -273,9 +277,17 @@ const navigate = async (page: Page, name: RegExp): Promise<void> => {
 
 const results = (page: Page): Locator => page.getByRole('region', { name: /results/i });
 
-/** A tab may be marked up as a tab or as a button. */
+/**
+ * A lookup tab, by its own role. The strip is a tablist whose controls each carry role="tab",
+ * and an explicit role REPLACES the implicit one, so a tab is never exposed as a button. This
+ * locator is returned without probing, so waiting for it waits for the strip to render rather
+ * than deciding its role from whatever happens to be on screen at the instant it is asked.
+ */
+const tab = (page: Page, name: RegExp): Locator => page.getByRole('tab', { name });
+
+/** A window chip may be marked up as a radio or as a button: that is a presentation choice. */
 const control = async (page: Page, name: RegExp): Promise<Locator> => {
-  for (const role of ['tab', 'radio', 'button', 'link'] as const) {
+  for (const role of ['radio', 'button', 'tab', 'link'] as const) {
     const found = page.getByRole(role, { name });
     if ((await found.count()) > 0) {
       return found.first();
@@ -306,10 +318,14 @@ const openByChange = async (browser: Browser, account: Account): Promise<Page> =
   await navigate(page, /^lookup$/i);
 
   // 'By change' stops being inert in this value: value 10 left it present and unselectable.
-  const byChange = await control(page, /^by change$/i);
+  const byChange = tab(page, /^by change$/i);
   await expect(byChange, 'the By change tab is on screen').toBeVisible();
   await byChange.click();
-  expect(await chosen(byChange), 'the By change tab is selectable now').toBe('true');
+  // A control with role="tab" carries which one is current in aria-selected.
+  await expect(byChange, 'the By change tab is selectable now').toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await expect(targetField(page), 'By change carries the target field').toBeVisible();
   return page;
 };
@@ -478,7 +494,16 @@ test('equal distances are broken by date, newer first', async ({ browser }) => {
   // one comes first. Without the tie-break the order here would be arbitrary.
   await enterTarget(phone, '+21');
 
-  await expectResults(phone, 'at a target of +21', [
+  // This case asserts an exact row count, so it CHOOSES the window it reasons about rather than
+  // leaning on the default: at +21 the +17 meal is 4 off and so inside plus or minus 5, and a
+  // window is a tolerance, so it would have to be listed there. Plus or minus 2 admits exactly
+  // the two 1-off meals and excludes it at 4 off, leaving the tie-break as the only thing under
+  // test. The default stays plus or minus 5; it is chosen for a target of +20 and says nothing
+  // about any other target.
+  await (await windowChip(phone, 2)).click();
+  expect(await chosen(await windowChip(phone, 2)), 'the chosen window is plus or minus 2').toBe('true');
+
+  await expectResults(phone, 'at a target of +21, at plus or minus 2', [
     { ...exact, distance: '1 off' },
     { ...twoOff, distance: '1 off' },
   ]);
