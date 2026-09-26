@@ -17,11 +17,11 @@ Stand up the static web app shell, the owner-scoped Postgres schema and the Supa
 ### Targets
 | Path | Decision | Reason |
 |---|---|---|
-| `package.json` | CREATE_NEW | The repository has no Node manifest; the build, the Supabase client dependency and the verification scripts need one. |
-| `tsconfig.json` | CREATE_NEW | TypeScript is the source language, so the compiler needs strict settings the build and the tests share. |
-| `vite.config.ts` | CREATE_NEW | Vite produces the static bundle GitHub Pages serves and resolves the base path for a project page. |
-| `index.html` | CREATE_NEW | The single page the static host serves; it carries the viewport meta that makes the layout fluid. |
-| `src/main.ts` | CREATE_NEW | The composition root that builds the adapters, reads the session and renders either the sign-in screen or the signed-in shell. |
+| `package.json` | EXTEND | The walking skeleton already declares the build, the Supabase client and the verification scripts; this value adds nothing but may add a dependency it needs. |
+| `tsconfig.json` | EXTEND | Strict browser-source settings already exist; extend only if a new source root needs including. |
+| `vite.config.ts` | EXTEND | The static build and the GitHub Pages base path already exist; extend only for an environment variable this value introduces. |
+| `index.html` | EXTEND | The served page and its fluid viewport already exist; extend to load the theme stylesheet. |
+| `src/main.ts` | EXTEND | The composition root exists as an empty module; this value makes it build the adapters, read the session and render a screen. |
 | `src/ports/identity.ts` | CREATE_NEW | The driving port for sign-in, sign-out and current account, so the domain compiles without the Supabase SDK. |
 | `src/ports/log-store.ts` | CREATE_NEW | The driven port this value already consumes: read the signed-in account's entries for one date. |
 | `src/domain/entry.ts` | CREATE_NEW | The Entry and NightInsulin types and the pure functions that turn one into its day-log line, so the reading rule is testable without a browser. |
@@ -57,6 +57,9 @@ functional
 - Acceptance runs against the Supabase CLI local stack in Docker with two seeded accounts, so the oracle exercises real Postgres and real row-level security rather than a stub.
 - The oracle drives the built bundle served as static files, because a live GitHub Pages URL is not a locally falsifiable observation; the Pages workflow publishes that same bundle.
 - The oracle and its test supports are the only bytes the acceptance step writes. supabase/migrations/0001_owner_scoped_schema.sql is production scope and is written at craft time, so the oracle is red until the schema and its policies exist.
+- The test substrate is a walking skeleton committed before this value: Vite builds, Playwright drives a real browser at a 360 px viewport, and the Supabase CLI brings up local Postgres in Docker. The oracle runs `npm run test:acceptance -- tests/acceptance/own-data-only.spec.ts`, which names the oracle, so the pre-craft red check and the candidate verification are the same command.
+- The package is CommonJS, because Playwright compiles TypeScript tests to CommonJS unless the package declares ESM, and the acceptance support resolves the repository root through __dirname.
+- Typechecking is split in two: tsconfig.json covers the browser sources with DOM types only, and tsconfig.node.json covers the tests and the tool configuration with Node types, so a browser source can never reach a Node API by accident.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -98,4 +101,4 @@ Falsifier: Account B's page contains any text from a row account A owns, or acco
 Oracle target locator: `tests/acceptance/own-data-only.spec.ts`
 
 Verification command: `npm run build`
-Verification command: `npm run test:acceptance`
+Verification command: `npm run test:acceptance -- tests/acceptance/own-data-only.spec.ts`
