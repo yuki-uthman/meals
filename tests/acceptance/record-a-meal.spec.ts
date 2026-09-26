@@ -21,8 +21,10 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  * edit updated one row instead of writing a second.
  *
  * Every field is located by its EXACT label -- 'Slot', 'Time', 'Glucose before',
- * 'Rapid-acting units', 'Exercise', 'Note', 'Glucose after' on the meal form and 'Food',
- * 'Type', 'Amount', 'Unit' on the Add food screen -- never by a loose word or an
+ * 'Rapid-acting units', 'Exercise', 'Note', 'Glucose after' on the meal form and 'Food
+ * name', 'Type', 'Amount', 'Unit' on the Add food screen -- 'Food name' and not 'Food',
+ * so it cannot be confused with the 'Foods' heading of the list it adds to. Never by a
+ * loose word or an
  * alternation. A pattern like /units|dose/i is unique only by accident of what exists
  * today: value 5 puts 'Decrease dose' and 'Increase dose' beside the dose field, and the
  * pattern would then resolve to three elements and fail against a correct product. On one
@@ -157,7 +159,7 @@ type Food = {
 const addFood = async (page: Page, food: Food): Promise<void> => {
   await page.getByRole('button', { name: /add food/i }).click();
 
-  await page.getByLabel('Food', { exact: true }).fill(food.name);
+  await page.getByLabel('Food name', { exact: true }).fill(food.name);
   await chooseOption(page, food.type);
   await page.getByLabel('Amount', { exact: true }).fill(food.amount);
   await chooseOption(page, food.unit);

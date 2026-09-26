@@ -432,6 +432,7 @@ functional
 - A dose field carries a minus and a plus button, named 'Decrease dose' and 'Increase dose', each moving the dose by exactly one unit. The dose never goes below zero: minus at zero does nothing. The dose input stays typeable, so a dose of 12 does not need twelve taps.
 - The night screen's dose and bedtime glucose get the same two controls, because a person keying a number at 22:30 wants the same thumb-sized target as at noon.
 - The food amount field keeps the system keyboard. The brief asks for the pad on glucose fields and the stepper on doses, and an amount in grams is not either of those.
+- Opening the pad must NOT replace, reset or detach the glucose input. The pad seeds itself from the field's current value and writes back into that same node, so a value already in the field survives being focused. This is not a test convenience: focusing a field is how a hardware-keyboard user starts typing, and a re-render that discards the node eats their first keystrokes exactly as it breaks value 3's oracle.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -464,6 +465,7 @@ Preserved observation: A meal is still recorded from an empty slot with its food
 - Failure: Condition: Delete is used on an empty field. | Outcome: Refusal | Observation: The field stays empty and nothing else changes.
 - Failure: Condition: Decrease is used on a dose of zero. | Outcome: Refusal | Observation: The dose stays at zero, because a negative dose is not a thing that can be taken.
 - Failure: Condition: The chip readings cannot be read because the server is unreachable. | Outcome: Retry | Observation: The pad opens with its digits working and no chips at all, because keying the number by hand must never be blocked by a convenience that failed to load.
+- Failure: Condition: A glucose field already holds a value and is then focused, opening the pad. | Outcome: Refusal | Observation: The field keeps its value and the pad opens showing that value as its current entry. Nothing is cleared, because the person focused a field rather than asking to start again.
 
 ### Acceptance supports
 - `tests/support/local-stack.ts`
@@ -472,11 +474,11 @@ Preserved observation: A meal is still recorded from an empty slot with its food
 ### Public oracle
 Observation: Tapping a glucose field opens an in-app number pad with chips for the last reading; dose fields change by one unit with minus and plus buttons.
 
-Stimulus: Account A owns a lunch today at 12:55 with before 112 and after 133, and a dinner yesterday at 19:10 with before 110. A browser at a 360 px viewport signs in, opens New meal from the Dinner slot's 'Not logged yet' card, and taps the glucose before field. It then keys 1, 5 and 0, keys a fourth digit 7, uses Delete, uses Clear, taps the 'Before last dinner 110' chip, and uses Done. It then uses Increase dose three times and Decrease dose once, and on a separate attempt uses Decrease dose on a dose of zero.
+Stimulus: Account A owns a lunch today at 12:55 with before 112 and after 133, and a dinner yesterday at 19:10 with before 110. A browser at a 360 px viewport signs in, opens New meal from the Dinner slot's 'Not logged yet' card, and taps the glucose before field. It then keys 1, 5 and 0, keys a fourth digit 7, uses Delete, uses Clear, taps the 'Before last dinner 110' chip, and uses Done. It then uses Increase dose three times and Decrease dose once, and on a separate attempt uses Decrease dose on a dose of zero. Separately it fills the glucose after field directly, without the pad, and then focuses it.
 
-Expected: Tapping the field reveals a group named 'Number pad' carrying a chip reading 'Last reading 133 · 12:55' and a chip reading 'Before last dinner 110'. Keying 1, 5, 0 puts 150 in the field. The fourth digit leaves it at 150. Delete leaves 15. Clear leaves it empty. The chip puts 110 in the field and the pad stays open. Done closes the pad and the field still holds 110. Three Increase presses make the dose 3 and one Decrease makes it 2. Decrease on a dose of zero leaves it at zero. The page never scrolls horizontally.
+Expected: Tapping the field reveals a group named 'Number pad' carrying a chip reading 'Last reading 133 · 12:55' and a chip reading 'Before last dinner 110'. Keying 1, 5, 0 puts 150 in the field. The fourth digit leaves it at 150. Delete leaves 15. Clear leaves it empty. The chip puts 110 in the field and the pad stays open. Done closes the pad and the field still holds 110. Three Increase presses make the dose 3 and one Decrease makes it 2. Decrease on a dose of zero leaves it at zero. The page never scrolls horizontally. A value put into a glucose field directly survives focusing it: the field still holds it and the pad opens showing it, so the field remains an ordinary input that the pad assists rather than replaces.
 
-Falsifier: The pad does not appear on tapping the field, or either chip is absent or carries the wrong number or time, or a digit does not append, or a fourth digit is accepted, or Delete does not remove exactly the rightmost digit, or Clear does not empty the field, or a chip does not fill the field or closes the pad, or Done does not close the pad or loses the value, or a step moves the dose by anything other than one, or the dose goes below zero, or the document scrolls horizontally at a 360 px viewport.
+Falsifier: The pad does not appear on tapping the field, or either chip is absent or carries the wrong number or time, or a digit does not append, or a fourth digit is accepted, or Delete does not remove exactly the rightmost digit, or Clear does not empty the field, or a chip does not fill the field or closes the pad, or Done does not close the pad or loses the value, or a step moves the dose by anything other than one, or the dose goes below zero, or the document scrolls horizontally at a 360 px viewport. It also fails if focusing a glucose field that already holds a value clears or discards that value.
 
 ### Oracle and verification
 Oracle target locator: `tests/acceptance/number-pad.spec.ts`
