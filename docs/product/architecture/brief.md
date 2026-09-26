@@ -486,3 +486,94 @@ Oracle target locator: `tests/acceptance/number-pad.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/number-pad.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 6: the meal detail and every instance of the same foods
+
+### Purpose
+Open one meal and see what was eaten, the dose, the two readings with the change and the note, and below that every time the same foods were eaten, newest first, with the one being viewed marked -- which is how the person answers 'what happened last time I ate this?'.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read; an instance list may never reach another account's meals.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- Same meal means the same set of foods with the same amounts and units; slot, time, readings, dose and context are per instance.
+- The app never recommends a dose. The instance list reports what each dose was followed by and draws no conclusion.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/meal-identity.ts` | CREATE_NEW | The 'same foods' key and the instance list projection, as pure functions, because this is the rule the product's whole premise rests on. |
+| `src/ports/log-store.ts` | EXTEND | Add reading one meal by id and reading every instance that shares its foods. |
+| `src/adapters/supabase/log-store.ts` | EXTEND | Read the meal and the account's meals with their foods, so the domain can group them by identity. |
+| `src/ui/meal-detail.ts` | CREATE_NEW | The detail screen: the summary, what was eaten, the note and the instance list. |
+| `src/ui/day-log.ts` | EXTEND | A meal card's body becomes the way into its detail, while its Edit control stays where value 3 put it. |
+| `src/ui/theme.css` | EXTEND | Detail summary, instance row and viewing-mark tokens in both palettes. |
+| `src/main.ts` | EXTEND | Route to the detail for a meal id and back, and from the detail into Edit. |
+| `tests/acceptance/meal-detail.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- Two meals are the same meal when their foods form the same multiset of name, amount and unit. The name is compared trimmed and case-insensitively, so 'oats' and 'Oats' are one food; the amount and the unit must match exactly. Order does not matter. The food TYPE is not part of identity, because the brief defines sameness by foods, amounts and units only, and a type is a classification of a food rather than a property of the meal.
+- The identity key is computed in the domain, not in SQL, because it is a multiset over related rows and a person's whole history here is one or two people's meals. If that ever stops being cheap the key becomes a stored column, and the rule stays in one place either way.
+- The instance list is EVERY instance of those foods, the viewed one included, newest first by date then by clock time. Including it is what makes marking it meaningful, and the brief asks for the viewed instance to be marked.
+- The viewed instance carries a visible 'viewing' mark and is the only row that does. The mark is text, not only a border, so it is readable without colour.
+- An instance row reads as the date and slot, the dose, the two readings and the change with its change band: 'Thu 10 Sep · Dinner', '6 u', '110', '142', '+32'. A row whose meal has no after reading shows the before alone with no change, exactly as a Today card does.
+- The heading counts the instances: 'Every time you ate this · 4'.
+- The summary shows the before, the change and the after, the dose, and nothing else numeric. There is no 'after 2 h' claim: the schema records no interval between the two readings, so naming one would be an invention.
+- The note section appears only when the meal has a note. An empty section would say something false about a meal nobody annotated.
+- A meal card on Today gains a link in its body, named for the meal, that opens the detail. The card stays a list item carrying exactly the data-entry elements value 2 established, and the Edit control stays on the card where value 3 put it, so neither earlier oracle changes meaning.
+- 'Log again with these foods' is value 7 and is not built here. The detail screen leaves room for it and nothing more.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| LogStore | `src/ports/log-store.ts:34` | EXTEND | Every read goes through the one boundary. |
+| changeBand | `src/domain/band.ts:1` | REUSE | An instance row's change is banded by the same rule as a Today card and a History cell. |
+| foodText | `src/domain/entry.ts:57` | REUSE | 'Chicken rice 250 g' is already how a food with its amount reads. |
+| doseText | `src/domain/entry.ts:64` | REUSE | '6 u' is already how a dose reads. |
+| slotLabel | `src/domain/entry.ts:47` | REUSE | An instance row names its slot the way every screen does. |
+| dayLogSection | `src/ui/day-log.ts:59` | EXTEND | The card gains a link; its structure and its marked data stay as two oracles already read them. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/today-screen.spec.ts`
+
+Move: Before the detail exists, lift the meal card's reading of dose, readings and change into one shared projection, so the Today card, the instance row and the detail summary all read one rule rather than three copies of it.
+
+Preserved observation: The Today screen still shows a card per logged meal with its time, foods, dose and readings, a 'Not logged yet' card per empty slot and the night insulin card, and ownership is still judged on data-entry elements.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The meal card's structure and its data-entry marking | producer | `src/ui/day-log.ts:59` | UNCHANGED_COMPATIBLE | The card stays a list item with the same marked values and the same Edit control; a link is added inside it. |
+| The today-screen and record-a-meal oracles as consumers of that card | consumer | `tests/acceptance/today-screen.spec.ts:262` | UNCHANGED_COMPATIBLE | They read the card's text and its band attributes, neither of which moves. |
+
+### Boundaries
+- Driving port: A person opening a meal: see what was eaten with amounts and types, the dose, the two readings with the change and the note, and every other time the same foods were eaten with what each dose was followed by.
+- Driven port: The log-store port for the meal and for the account's meals with their foods.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The identity rule and the instance projection are pure functions in src/domain over meals already read. The screen is a pure function of that projection.
+- Failure: Condition: The meal id in the route names no meal the account owns. | Outcome: Refusal | Observation: The screen shows 'That meal is not here.' with a way back to Today, and never a blank detail, because an id that row-level security hides must read as absent rather than as broken.
+- Failure: Condition: The instance read fails because the server is unreachable. | Outcome: Retry | Observation: The summary, foods and note still show, and the instance section alone shows 'Cannot reach the server. Try again.' with a usable retry control, because the meal in hand is worth reading even when its history cannot be fetched.
+- Failure: Condition: The meal is the only instance of its foods. | Outcome: Indeterminate | Observation: The heading reads 'Every time you ate this · 1' and the single row is the viewed one, marked. No comparison is offered, because there is nothing yet to compare against and an empty list would read as a missing history rather than a first time.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: Opening a meal shows its foods with amounts, dose, before → after with the change, note, and below that every earlier instance with the same foods, newest first, each as dose, before → after and change; the instance being viewed is marked.
+
+Stimulus: Account A owns four dinners whose foods are Chicken rice of type Mixed dish 250 g and Cucumber salad of type Vegetable 80 g: today at 19:05 with 6 units, 110 to 142 and the note 'Ate slowly, 20 min walk afterwards.'; seven days ago with 8 units, 145 to 121; thirty days ago with 5 units, 122 to 178; thirty-six days ago with 7 units, 168 to 120. It also owns a dinner of Soup of type Mixed dish 300 ml with 4 units, 150 to 110, and a dinner whose foods are the same two names with Cucumber salad at 90 g instead of 80 g. A browser at a 360 px viewport signs in and opens today's Dinner card body from Today.
+
+Expected: The detail names the slot Dinner with today's date and 19:05. The summary shows '110', '142', '+32' in the rose change band and '6 u'. What was eaten lists 'Chicken rice' with 'Mixed dish' and '250 g', and 'Cucumber salad' with 'Vegetable' and '80 g'. The note reads 'Ate slowly, 20 min walk afterwards.'. The instance heading reads 'Every time you ate this · 4' and exactly four rows follow, newest first: '6 u' 110 to 142 '+32' in rose and marked 'viewing'; '8 u' 145 to 121 '−24' in stable; '5 u' 122 to 178 '+56' in rose; '7 u' 168 to 120 '−48' in dropped. Only the first row is marked. Neither the Soup dinner nor the 90 g dinner appears. The page never scrolls horizontally.
+
+Falsifier: A food, amount, type, dose, reading, change or band is missing or wrong, or the note is absent, or the instance count is not 4, or the rows are not newest first, or more or fewer than one row is marked, or the marked row is not the one being viewed, or the Soup dinner appears, or the dinner differing only by an amount appears, or a change is drawn for a meal with no after reading, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/meal-detail.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/meal-detail.spec.ts`
+Verification command: `npm run test:acceptance`
