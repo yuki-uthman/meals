@@ -69,6 +69,7 @@ import { mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { historyScreen, type HistoryState } from './ui/history';
+import { lookupScreen, type LookupState } from './ui/lookup';
 import { shell, type ShellHandlers, type ShellTab } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
 
@@ -97,7 +98,20 @@ const start = (): void => {
   let readToken = 0;
 
   /** Which screen the signed-in person is on. Today unless a meal is being filled in. */
-  let screen: 'day' | 'meal' | 'food' | 'night' | 'detail' | 'history' = 'day';
+  let screen: 'day' | 'meal' | 'food' | 'night' | 'detail' | 'history' | 'lookup' = 'day';
+
+  /**
+   * Looking back by food. The whole history is read once when the section is
+   * opened and every keystroke is matching over what is already in hand, so
+   * typing is arithmetic rather than a read per character. What is typed lives
+   * here, not in the screen, for the same reason a draft does: the screen is a
+   * pure function of it and outlives no redraw of its own.
+   */
+  let lookupMeals: readonly MealInstance[] | null = null;
+  let lookupQuery = '';
+  let lookupMessage: string | null = null;
+  /** Guards against a slow read from an earlier account landing on a later one. */
+  let lookupToken = 0;
 
   /**
    * The History grid. The whole of the longest period is read once and the
@@ -331,11 +345,42 @@ const start = (): void => {
       ),
     );
 
+  /**
+   * The lookup as the screen reads it. Which meals match what was typed, and the
+   * three figures over them, are the domain's rules; this only says which of the
+   * three states the section is in.
+   */
+  const lookupSectionState = (): LookupState =>
+    lookupMessage !== null
+      ? { kind: 'failed', message: lookupMessage }
+      : { kind: 'loaded', meals: lookupMeals ?? [] };
+
+  const lookupSection = (): HTMLElement =>
+    shell(
+      { date, isToday: date === localToday(), heading: 'Lookup', tab: 'lookup' },
+      dayHandlers,
+      lookupScreen(
+        { query: lookupQuery, state: lookupSectionState() },
+        {
+          // Recorded and deliberately NOT re-rendered here: the screen redraws its
+          // own results below the field, because rebuilding the whole screen on a
+          // keystroke would replace the field being typed into. Recording it is
+          // what lets a redraw for any other reason keep what was typed.
+          onQuery: (query) => {
+            lookupQuery = query;
+          },
+          onOpen: (id) => void openMealDetail(id),
+          onRetry: () => void retryLookup(),
+        },
+      ),
+    );
+
   const signedInScreen = (): HTMLElement => {
     if (screen === 'night' && nightDraft !== null && nightHistory !== null) {
       return nightScreen(nightDraft, nightHistory);
     }
     if (screen === 'history') return historySection();
+    if (screen === 'lookup') return lookupSection();
     if (screen === 'detail' && detailRefusal !== null) return missingScreen(detailRefusal);
     if (screen === 'detail' && detailMeal !== null) return detailScreen(detailMeal);
     if (screen === 'food' && foodDraft !== null) return foodScreen(foodDraft);
@@ -423,10 +468,70 @@ const start = (): void => {
     await loadHistory();
   };
 
-  /** The bottom navigation: the two sections this brief has built so far. */
+  /**
+   * The meals a lookup matches over: every meal the account recorded, read through
+   * the port with no account identifier anywhere, so row-level security is the only
+   * thing that decides whose meals a lookup can reach.
+   */
+  const loadLookup = async (): Promise<boolean> => {
+    const token = ++lookupToken;
+    const outcome = await logStore.mealHistory();
+    // A read for an earlier account, or an earlier attempt, must not land here.
+    if (token !== lookupToken) return false;
+
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return false;
+    }
+    if (outcome.kind === 'retry') {
+      // No results at all rather than results over half a log, and it says why.
+      lookupMeals = null;
+      lookupMessage = outcome.message;
+      return true;
+    }
+
+    lookupMeals = outcome.meals;
+    lookupMessage = null;
+    return true;
+  };
+
+  /** Reading again after a failure, from the screen's own Try again control. */
+  const retryLookup = async (): Promise<void> => {
+    if (await loadLookup()) render();
+  };
+
+  /**
+   * The meals are read BEFORE the screen is shown, exactly as the night list and
+   * the pad's chips are. A search box that appeared while its material was still
+   * in flight would either answer a word over half a log or quietly lose it.
+   */
+  const openLookupSection = async (): Promise<void> => {
+    clearDetail();
+    mealDraft = null;
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
+    // A fresh search each time the section is opened: coming back to Lookup asks
+    // what the person is looking for now, rather than answering an older question.
+    lookupQuery = '';
+    lookupMeals = null;
+    lookupMessage = null;
+    if (!(await loadLookup())) return;
+    screen = 'lookup';
+    render();
+  };
+
+  /** The bottom navigation: the three sections this brief has built so far. */
   const goTo = (tab: ShellTab): void => {
     if (tab === 'history') {
       void openHistorySection();
+      return;
+    }
+    if (tab === 'lookup') {
+      void openLookupSection();
       return;
     }
     clearDetail();
@@ -837,6 +942,12 @@ const start = (): void => {
     historyMessage = null;
     historyView = 'before';
     historyPeriodKey = DEFAULT_HISTORY_PERIOD;
+    // So do the meals a lookup matches over, and what was typed to search them: a
+    // lookup may never reach a meal of the account that has just left.
+    lookupToken += 1;
+    lookupMeals = null;
+    lookupMessage = null;
+    lookupQuery = '';
     signInState = { ...emptySignInState, message };
     render();
   };
@@ -906,6 +1017,11 @@ const start = (): void => {
     historyMessage = null;
     historyView = 'before';
     historyPeriodKey = DEFAULT_HISTORY_PERIOD;
+    // And for the lookup: a search may never match a meal of the previous account's.
+    lookupToken += 1;
+    lookupMeals = null;
+    lookupMessage = null;
+    lookupQuery = '';
     if (account === null) {
       render();
       return;

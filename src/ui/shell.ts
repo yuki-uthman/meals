@@ -11,8 +11,8 @@ export type FormFrame = {
   readonly busy: boolean;
 };
 
-/** The sections the bottom navigation carries. Lookup joins them at value 10. */
-export type ShellTab = 'today' | 'history';
+/** The sections the bottom navigation carries. Lookup joined them at value 10. */
+export type ShellTab = 'today' | 'lookup' | 'history';
 
 export type ShellState = {
   readonly date: IsoDate;
@@ -50,6 +50,7 @@ export type ShellHandlers = {
 
 const NAV_ENTRIES: readonly (readonly [ShellTab, string])[] = [
   ['today', 'Today'],
+  ['lookup', 'Lookup'],
   ['history', 'History'],
 ];
 
@@ -157,8 +158,8 @@ const sectionControls = (handlers: ShellHandlers): HTMLElement => {
 };
 
 /**
- * The bottom navigation: Today and History, and nothing else. Lookup arrives at
- * value 10 and Settings is in no value of this brief, so neither is here.
+ * The bottom navigation: Today, Lookup and History, and nothing else. Settings is
+ * in no value of this brief, so it is not here.
  */
 const bottomNavigation = (state: ShellState, handlers: ShellHandlers): HTMLElement => {
   const nav = document.createElement('nav');

@@ -1095,3 +1095,226 @@ label {
 .history__swatch[data-change-band='rose-high'] {
   background: var(--band-rose-high);
 }
+
+/* ------------------------------------------------------- lookup by food */
+
+/* A name that is hidden from the eye and present to everything else. The field
+   sits behind a search icon in the canvas, so its label is not drawn -- but it is
+   still what the field is called, so it is taken out of the picture rather than
+   out of the document. Never display:none, which would take it out of both. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.lookup-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The three tabs, side by side and each taking its share of the width, so they
+   wrap rather than pushing the document sideways at 360 px. */
+.lookup__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.lookup__tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.lookup__tab--on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* A tab that is not built yet. It is dimmed and refuses the tap, so it reads as
+   somewhere this app will go rather than as somewhere it already is. */
+.lookup__tab[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lookup__search {
+  display: flex;
+  min-width: 0;
+}
+
+.lookup__field {
+  width: 100%;
+  min-width: 0;
+}
+
+.lookup__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* ------------------------------------------------ the summary of a lookup */
+
+.lookup-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* 'Chicken rice · 4 meals'. */
+.lookup-summary__heading {
+  margin: 0;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+/* The three figures divide the width they have and wrap when there is not enough,
+   so nothing here can widen the document. */
+.lookup-summary__figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.figure {
+  flex: 1 1 6rem;
+  min-width: 0;
+}
+
+/* The figure's name is furniture; the number is the reading. Deliberately not
+   text-transformed, so the words drawn are the words the domain produced. */
+.figure__name {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.figure__value {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* How many meals the figure is over. It is drawn as quietly as the name and never
+   omitted: a figure over two meals must not read like one over twenty. */
+.figure__meals,
+.figure__note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+/* --------------------------------------------- the results of a lookup */
+
+.lookup-results {
+  min-width: 0;
+}
+
+.lookup-results__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.lookup-results__empty {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.result {
+  min-width: 0;
+}
+
+/* The whole row is the way into the meal, styled back to being a row: no chrome
+   of a button, the text aligned as it was, and it wraps rather than widening. */
+.result__open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.result__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 'Thu 10 Sep · Dinner': when the meal was, as furniture above the readings. */
+.result__when {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.result__dose {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.result__foods {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.result__readings {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.result__arrow {
+  color: var(--ink-muted);
+}
+
+/* The change is the judgement, so it is the only banded thing on the row, and its
+   colour is bound to the published band name rather than written into the markup. */
+.result__change {
+  font-weight: 600;
+}

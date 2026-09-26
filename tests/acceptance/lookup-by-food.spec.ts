@@ -434,8 +434,7 @@ test('typing a food summarises and lists every past meal that contained it', asy
 
   // --- The results ---------------------------------------------------------
   const rows = await resultRows(phone);
-  for (let index = 0; index < expectedResults.length; index += 1) {
-    const expected = expectedResults[index];
+  for (const [index, expected] of expectedResults.entries()) {
     const where = `result ${index} (${expected.daysAgo} day(s) ago)`;
     const row = rows.nth(index);
     const text = normaliseSigns(await textOf(row));
