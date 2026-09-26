@@ -205,3 +205,101 @@ Oracle target locator: `tests/acceptance/today-screen.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/today-screen.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 3: recording a meal
+
+### Purpose
+Let the person record a meal -- slot, time, one or more foods with type and amount, glucose before, rapid-acting units, exercise context and note, with glucose after optional -- see it on Today straight away, and reopen it later to add the after reading.
+
+### Constraints
+- The front end is a static bundle only; the browser writes through the Supabase JS client and there is no server process.
+- Row-level security stays the only thing that scopes a read or a write; no screen may send or filter by user_id.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- Food types are the brief's seven; amount units are the brief's five.
+- The app never recommends a dose. A saved dose is what the person says they took, never a suggestion.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `supabase/migrations/0002_recording_constraints.sql` | CREATE_NEW | Constrain exercise_context and meal_foods.unit to their fixed lists, the same way food_type already is, so a mistyped value is refused at the row. |
+| `src/domain/meal-draft.ts` | CREATE_NEW | The draft a person is filling in and the pure rules that say when it may be saved, so the refusals are testable without a browser. |
+| `src/domain/entry.ts` | EXTEND | Add the food type and unit vocabularies the draft and the form share. |
+| `src/ports/log-store.ts` | EXTEND | Add saving a new meal and updating an existing one, beside reading a date. |
+| `src/adapters/supabase/log-store.ts` | EXTEND | Write the meal and its foods through PostgREST, still with no user_id of its own. |
+| `src/ui/meal-form.ts` | CREATE_NEW | The New meal and Edit meal screen: slot, time, glucose before, foods, dose, context, note and glucose after. |
+| `src/ui/food-form.ts` | CREATE_NEW | The Add food screen: name, type from the fixed list, amount and unit. |
+| `src/ui/day-log.ts` | EXTEND | An empty slot card becomes the way to log that slot, and a meal card gains its Edit control. |
+| `src/ui/shell.ts` | EXTEND | The frame gains the Cancel and Save header a form screen needs. |
+| `src/ui/theme.css` | EXTEND | Form, field, segmented control, chip and list-row tokens for both palettes. |
+| `src/main.ts` | EXTEND | Route between Today, New meal, Edit meal and Add food, and re-read the day after a save. |
+| `tests/acceptance/record-a-meal.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- A meal is recorded from the Today screen: the 'Not logged yet' card for a slot opens New meal with that slot already chosen, and a logged meal card carries an Edit control named 'Edit breakfast', 'Edit lunch' and so on.
+- The Edit control stays on the card for the rest of the delivery. Value 6 makes the card body open the meal detail, and the Edit control keeps its place and its name, so this value's oracle is not broken by that change.
+- Every numeric field is a real labelled input that works with the device keyboard: glucose before, glucose after, the dose and a food's amount. Value 5 adds the in-app number pad and the minus and plus stepper as controls that write into these same inputs rather than replacing them, so a field keeps one accessible name and one value for the whole delivery.
+- New meal requires a slot, a time and at least one food. Saving without a food is refused in place with 'Add at least one food.' and nothing is written. Glucose before, the dose, exercise context, the note and glucose after are all optional, because a person who forgot to measure must still be able to record what they ate.
+- The time field defaults to the current local clock time and the meal is recorded against the date the Today screen is reading, so a meal logged late at night lands on the day the person is looking at rather than on the server's date.
+- Exercise context is one of three: 'None', 'Before meal', 'After meal', stored as none, before, after. It defaults to None.
+- Amount units are the brief's five: g, ml, pc, cup, tbsp. Food types are the brief's seven, offered as a list, and a food must have one.
+- A meal and its foods are written together. If the foods fail to write after the meal row has been created, the meal row is removed again, because a meal with no foods is not a thing this product can compare and a half-written meal would quietly corrupt every later lookup.
+- Editing an existing meal opens the same screen with the recorded values in place and the heading 'Edit meal'. Saving updates that row rather than creating another, so adding the after reading later does not produce a second meal.
+- Saving returns to Today for the same date and the day is re-read, so the new card is what the store holds rather than what the form believed it wrote.
+- Out of scope here and named so the form is not mistaken for finished: 'Start from a past meal' is value 7, the last-time suggestion box is value 8, and the in-app number pad and dose stepper are value 5. The reminder toggle the canvas draws is not in any value and is not built.
+- The acceptance suite starts the local stack and applies migrations once per run, not once per spec: a reset restarts containers and costs about ninety seconds, and the suite is a declared verification vector that grows with every value. A spec isolates itself by removing its own accounts and rows through the service role, and seeds accounts under its own email prefix.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| LogStore | `src/ports/log-store.ts:17` | EXTEND | The same boundary gains writing; a second port for writes would let a screen reach the database two ways. |
+| MealSlot | `src/domain/entry.ts:8` | REUSE | The slot vocabulary the cards already use is the one the selector offers. |
+| FoodPortion | `src/domain/entry.ts:10` | EXTEND | Reading never needed the food type; recording does, so the type joins the portion. |
+| dayLogSection | `src/ui/day-log.ts:59` | EXTEND | The cards it already draws become the entry points; nothing about the reading changes. |
+| shell | `src/ui/shell.ts:24` | EXTEND | One frame for every screen, so a form does not invent its own header. |
+| localToday | `src/domain/entry.ts:144` | REUSE | The date a meal is recorded against is the one the day log already computes locally. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/today-screen.spec.ts`
+
+Move: Before the form exists, give the shell a header that can carry Cancel and Save, and split the day log's card rendering from its entry points, so the form work adds screens rather than rewriting the two that pass today.
+
+Preserved observation: The Today screen still shows a card per logged meal, a 'Not logged yet' card per empty slot and the night insulin card, and ownership is still judged on data-entry elements.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The meals and meal_foods tables and their row-level security | producer | `supabase/migrations/0001_owner_scoped_schema.sql:14` | UNCHANGED_COMPATIBLE | 0002 only narrows two text columns to their fixed lists; every row the seeds and the reading path already write satisfies them. |
+| The log-store port read shape | consumer | `src/ports/log-store.ts:17` | UNCHANGED_COMPATIBLE | dayLog keeps its signature and its outcomes; writing is added beside it. |
+
+### Boundaries
+- Driving port: A person recording what they ate: choose the slot and time, add foods with type and amount, enter the glucose before, the dose, the context and a note, save, and come back later to add the after reading.
+- Driven port: The log-store port for writing a meal with its foods, updating one, and re-reading the date.
+- Driven port: The identity port, unchanged, for the session the write runs as.
+- Dependency direction: The form is a pure function of a draft plus handlers; the draft rules live in src/domain and import nothing. The Supabase adapter depends on the port, never the form.
+- Failure: Condition: Save is used with no food added. | Outcome: Refusal | Observation: The screen stays, shows 'Add at least one food.', and nothing is written.
+- Failure: Condition: The meal row writes but its foods do not. | Outcome: Refusal | Observation: The meal row is removed again, the screen shows 'Could not save the meal. Nothing was recorded.', and Today is unchanged.
+- Failure: Condition: The server cannot be reached while saving. | Outcome: Retry | Observation: The screen keeps every value the person entered, shows 'Cannot reach the server. Try again.', and the Save control becomes usable again.
+- Failure: Condition: The save is sent and the response is lost, so the browser cannot tell whether Postgres committed it. | Outcome: Indeterminate | Observation: The screen shows 'Could not confirm the save. Check Today before saving again.' and does not retry by itself, because a duplicated meal would corrupt every comparison this product exists for.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: The user records a meal with slot, time, one or more foods (name, type from the fixed list, amount, unit), glucose before, rapid-acting units, exercise context, note and optionally glucose after; it appears on Today and can be edited later to add the after reading.
+
+Stimulus: Account A owns nothing. On the built bundle at a 360 px viewport it signs in, uses the Dinner slot's 'Not logged yet' card, and records: time 19:10, glucose before 150, food 'Chicken rice' of type Mixed dish, amount 250 g, a second food 'Cucumber salad' of type Vegetable, amount 80 g, dose 6 units, exercise context 'Before meal', note 'walked home', and no after reading. It saves. It then uses that card's Edit control, enters glucose after 182 and saves again. Separately, on a fresh New meal with no food added, it uses Save.
+
+Expected: After the first save Today shows a Dinner card with 19:10, 'Chicken rice 250 g · Cucumber salad 80 g', '6 u' and '150' with no change shown, because there is no after reading yet. After the edit the same single Dinner card shows '150', '182' and '+32' in the stable change band, and there is still exactly one dinner on the date. Saving a meal with no food is refused in place with 'Add at least one food.' and Today gains no card. The page never scrolls horizontally.
+
+Falsifier: A recorded value is missing from the card or wrong, or a change is drawn before an after reading exists, or the edit creates a second dinner rather than updating the first, or a meal with no food is written, or the note, the exercise context or the food types are not what was entered when the meal is reopened, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/record-a-meal.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/record-a-meal.spec.ts`
+Verification command: `npm run test:acceptance`
