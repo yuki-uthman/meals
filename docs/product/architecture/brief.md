@@ -341,6 +341,7 @@ functional
 - The dose, the time and the bedtime glucose are real labelled inputs, as value 3 settled for every numeric field. Value 5 adds the minus and plus stepper and the in-app number pad as controls that write into these same inputs, so a field keeps one accessible name and one value for the whole delivery.
 - The dose is required; the time and the bedtime glucose are optional, because a person who took their basal and did not measure must still be able to record the dose.
 - Saving returns to Today for the same date and the day is re-read, so the night card shows what the store holds.
+- The three fields are labelled 'Dose', 'Taken at' and 'Bedtime glucose'. 'Taken at' rather than the canvas's 'Time' on purpose: 'Time' is a substring of 'Bedtime glucose', so a label match on it resolves to two fields and no implementation can satisfy it. Labels on one screen must not contain one another.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -377,7 +378,7 @@ Not applicable: The seams this value needs already exist: the log-store port tak
 ### Public oracle
 Observation: The user records night insulin (long-acting units, time, bedtime glucose); the screen lists the last five nights as dose and next-morning reading.
 
-Stimulus: Account A owns five night records, dated one to five days before today in local terms, with doses 18, 18, 16, 16 and 20 units in that order from most recent. It also owns one meal on each of the four days before today, whose earliest before reading is 106 on yesterday, 190 two days ago, 64 three days ago and 260 four days ago. Today has no night record and no meal. A browser at a 360 px viewport signs in as account A, opens the night insulin card from Today, and records 18 units at 22:30 with bedtime glucose 128, then saves.
+Stimulus: Account A owns five night records, dated one to five days before today in local terms, with doses 18, 18, 16, 16 and 20 units in that order from most recent. It also owns one meal on each of the four days before today, whose earliest before reading is 106 on yesterday, 190 two days ago, 64 three days ago and 260 four days ago. Today has no night record and no meal. A browser at a 360 px viewport signs in as account A, opens the night insulin card from Today, and records 18 units in 'Dose', 22:30 in 'Taken at' and 128 in 'Bedtime glucose', then saves.
 
 Expected: The night screen lists exactly five rows, newest first. The first is yesterday's night, '18 u', and an em dash for the morning with no level band, because today has no reading. The second is '18 u' with '106' in the in-range level band. The third is '16 u' with '190' in the high band. The fourth is '16 u' with '64' in the low band. The fifth is '20 u' with '260' in the very-high band. After saving, Today's night insulin card shows '18 u at 22:30'. Saving again with the dose cleared is refused with 'Enter the dose.' and the stored night is unchanged. The page never scrolls horizontally.
 
