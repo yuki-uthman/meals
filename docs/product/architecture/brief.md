@@ -29,7 +29,7 @@ Stand up the static web app shell, the owner-scoped Postgres schema and the Supa
 | `src/adapters/supabase/identity.ts` | CREATE_NEW | Implements the identity port against Supabase Auth and maps its errors onto the named failure outcomes. |
 | `src/adapters/supabase/log-store.ts` | CREATE_NEW | Implements the log-store port against PostgREST with no user_id filter of its own, so row-level security alone decides what comes back. |
 | `src/ui/sign-in.ts` | CREATE_NEW | The sign-in screen: a labelled email and password form with the refusal and retry messages. |
-| `src/ui/shell.ts` | CREATE_NEW | The signed-in frame: the header, the sign-out control and the slot the day log renders into. |
+| `src/ui/shell.ts` | CREATE_NEW | The signed-in frame: the header naming today's local date, the 'Sign out' control, and the slot the day log renders into. |
 | `src/ui/day-log.ts` | CREATE_NEW | The reading surface this value is judged on: the signed-in account's own entries for one date as one line each, with the empty state when it owns none. |
 | `src/ui/theme.css` | CREATE_NEW | The light and dark palette tokens taken from the canvas reference, selected by the device colour-scheme setting. |
 | `supabase/config.toml` | CREATE_NEW | Pins the local Supabase stack the acceptance run starts with the CLI. |
@@ -48,7 +48,7 @@ functional
 - The Supabase JS client v2 is the only data access path. There is no custom server and no API layer of our own.
 - The Supabase project URL and anon key are build-time public configuration injected as Vite environment variables; both are safe to publish because row-level security, not key secrecy, is what separates the two accounts.
 - This value creates the whole user schema, because row-level security has to be right on every table from the first migration rather than bolted on per screen. The three user tables are meals, meal_foods and night_insulin.
-- meals holds id, user_id, slot, eaten_at, glucose_before, glucose_after, insulin_units, exercise_context, note. meal_foods holds id, user_id, meal_id, name, food_type, amount, unit, position. night_insulin holds id, user_id, night_on, units, taken_at, bedtime_glucose. Glucose columns are integers in mg/dL.
+- meals holds id, user_id, slot, eaten_on, eaten_at, glucose_before, glucose_after, insulin_units, exercise_context, note. meal_foods holds id, user_id, meal_id, name, food_type, amount, unit, position. night_insulin holds id, user_id, night_on, units, taken_at, bedtime_glucose. Glucose columns are integers in mg/dL.
 - Every user table carries user_id uuid not null default auth.uid() references auth.users(id) on delete cascade, has row-level security enabled, and has policies using (auth.uid() = user_id) for select, update and delete and with check (auth.uid() = user_id) for insert.
 - Ownership is enforced in Postgres, never in the browser. The log-store adapter issues no user_id filter of its own; if a policy were dropped the oracle would fail rather than a client-side filter hiding it.
 - The reading surface for this value is deliberately plain: one text line per entry, no cards and no meal slots. A meal line reads 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml' and a night insulin line reads '18 u at 22:30'. Value 2 reshapes these same rows into the designed cards.
@@ -60,6 +60,11 @@ functional
 - The test substrate is a walking skeleton committed before this value: Vite builds, Playwright drives a real browser at a 360 px viewport, and the Supabase CLI brings up local Postgres in Docker. The oracle runs `npm run test:acceptance -- tests/acceptance/own-data-only.spec.ts`, which names the oracle, so the pre-craft red check and the candidate verification are the same command.
 - The package is CommonJS, because Playwright compiles TypeScript tests to CommonJS unless the package declares ESM, and the acceptance support resolves the repository root through __dirname.
 - Typechecking is split in two: tsconfig.json covers the browser sources with DOM types only, and tsconfig.node.json covers the tests and the tool configuration with Node types, so a browser source can never reach a Node API by accident.
+- Sign-out is part of this value. The identity port carries a session-ending signOut, and the signed-in shell carries a control whose accessible name is 'Sign out'. Signing out clears the persisted session and returns the sign-in screen. Without it the two accounts cannot change hands on one phone, which is the situation the observation describes, and the stronger claim -- that account A's session is actually gone -- would go unproven.
+- meals carries eaten_on date not null, the local calendar date the meal belongs to, beside eaten_at timestamptz for the clock time. night_insulin carries night_on date not null the same way. Every day query selects on the date column, never on the timestamp, so no reading depends on the server's UTC offset and a 22:30 entry cannot fall into the wrong day.
+- meal_foods.food_type is not null with a check constraint over the seven types the brief fixes: carb-heavy, protein, vegetable, fruit, dairy, mixed dish, drink. The seeded foods are Oats as carb-heavy and Milk as dairy.
+- The shell opens on today's local calendar date. This value has no date-selection surface; value 2 adds the day stepper the canvas shows.
+- Browser sources typecheck under exactOptionalPropertyTypes, so a local type mirroring an SDK type with an optional property must spell it `prop?: T | undefined`. Supabase's AuthError.status is number | undefined and will not satisfy a bare `status?: number`.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -91,11 +96,11 @@ Not applicable: No contract exists yet between separately released parts. This v
 ### Public oracle
 Observation: A person opens the site on a phone, signs in with email and password, and sees only their own data; a second account sees none of the first account's rows.
 
-Stimulus: Two accounts exist in the local Supabase stack. Account A owns, dated today: one meals row (slot breakfast, eaten_at 07:40, glucose_before 104, glucose_after 186, insulin_units 5) with two meal_foods rows (Oats, 60 g and Milk, 200 ml), and one night_insulin row (units 18, taken_at 22:30, bedtime_glucose 132). Account B owns no rows in any of the three tables. A browser at a 360 px viewport loads the built static bundle, signs in as account A and reads the day log, then signs out and signs in as account B on the same bundle and reads the day log again.
+Stimulus: Two accounts exist in the local Supabase stack. Account A owns, dated today in local terms: one meals row (slot breakfast, eaten_on today, eaten_at 07:40, glucose_before 104, glucose_after 186, insulin_units 5) with two meal_foods rows (Oats, carb-heavy, 60 g and Milk, dairy, 200 ml), and one night_insulin row (night_on today, units 18, taken_at 22:30, bedtime_glucose 132). Account B owns no rows in any of the three tables. One browser page at a 360 px viewport loads the built static bundle, signs in as account A and reads the day log, then uses the 'Sign out' control and signs in as account B on the same page and reads the day log again.
 
-Expected: Signed in as account A the day log shows the line 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml' and the line '18 u at 22:30'. Signed in as account B the day log shows exactly 'No entries yet.' and neither of account A's lines, nor any other text from account A's rows, appears anywhere on the page. Both sign-ins succeed and the page never scrolls horizontally.
+Expected: Signed in as account A the day log shows the line 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml' and the line '18 u at 22:30'. Signing out returns the sign-in screen. Signed in as account B the day log shows exactly 'No entries yet.' and neither of account A's lines, nor any other text from account A's rows, appears anywhere on the page. Account A signing in again still sees its own two lines, so the empty log was row-level security and not a lost seed. Both sign-ins succeed and the page never scrolls horizontally.
 
-Falsifier: Account B's page contains any text from a row account A owns, or account A's own two lines are missing from its day log, or either account cannot sign in with correct credentials, or the document scrolls horizontally at a 360 px viewport.
+Falsifier: Account B's page contains any text from a row account A owns, or account A's own two lines are missing from its day log on either sign-in, or signing out leaves the shell on screen, or either account cannot sign in with correct credentials, or the document scrolls horizontally at a 360 px viewport.
 
 ### Oracle and verification
 Oracle target locator: `tests/acceptance/own-data-only.spec.ts`
