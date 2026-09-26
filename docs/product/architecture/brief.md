@@ -1014,3 +1014,85 @@ Oracle target locator: `tests/acceptance/lookup-by-change.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/lookup-by-change.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 12: lookup by start
+
+### Purpose
+Answer 'last time I was at this reading, what did I eat, how much did I take and where did it land?': enter a starting reading and a window, and see the meals that began nearest it, nearest first, with the dose, both readings, the change and how far off each was.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read; a lookup may never reach another account's meals.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- Lookups return past meals nearest to the target first; each result shows how far off it was and links to that meal.
+- The app never recommends a dose.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/nearest-lookup.ts` | EXTEND | The nearest-first rule value 11 factored out is applied to the before reading; the quantity changes, the rule does not. |
+| `src/ui/lookup.ts` | EXTEND | The 'By start' tab becomes selectable and carries the reading field, its window chips and the results. |
+| `src/ui/theme.css` | EXTEND | Nothing new in kind; any adjustment the third panel needs, in both palettes. |
+| `src/main.ts` | EXTEND | Hold the third tab's target and window, and open a result's meal. |
+| `tests/acceptance/lookup-by-start.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- The target is a starting glucose reading, a whole positive number in mg/dL. The field is labelled 'Starting reading'. It is unsigned, unlike the change target, because a reading is never negative.
+- The windows are this value's own three, as the brief fixes them: plus or minus 5, 10 and 20, defaulting to plus or minus 10. They are NOT value 11's three; a tolerance on a reading is a coarser thing than a tolerance on a change.
+- A meal is matched on its BEFORE reading. A meal with no before reading cannot be matched at all and is absent. A meal with a before reading but no after reading IS matched and listed, showing its dose and its before reading with no change, because where it started is exactly what was asked and a missing after reading does not unask it.
+- Distance is the absolute difference between the meal's before reading and the target, and the order is distance first, then date newer first, so the order is total. The distance reads 'exact' at zero and otherwise 'N off', as value 11 established.
+- The result card is the one the other two lookups use, so a person reads one row shape across all three. The change is shown when the meal has both readings and omitted when it does not, as everywhere else.
+- With no reading entered the screen invites one. With a reading whose window matches nothing the results area says 'No meals within that window.', naming the window, because widening it is the move that finds something.
+- Each result opens that meal's detail, by id through the port, as every other list does.
+- Every case that asserts a row COUNT selects its window explicitly rather than relying on the default. Value 11's oracle was refused twice for reasoning about one target's distances under a default chosen for another's, and the same trap is here with a coarser window.
+- The fixture's numbers are mutually distinct -- every before reading, after reading, change and dose differs from every other -- so an assertion that a value is absent from the results cannot be satisfied or broken by a different meal that happens to share it.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| nearestWithin | `src/domain/nearest-lookup.ts:1` | REUSE | The window, the distance and the total order are already this module's job; only the quantity read off a meal differs. |
+| lookupResultCard | `src/ui/lookup.ts:1` | REUSE | A third card shape would make the three lookups read differently for no reason. |
+| mealHistory | `src/ports/log-store.ts:78` | REUSE | The account's meals are already read this way by four other screens. |
+| changeBand | `src/domain/band.ts:1` | REUSE | A result's change is banded by the one rule. |
+| openMealDetail | `src/main.ts:408` | REUSE | A result opens a meal exactly as every other list's does. |
+
+### Prefactoring
+Not applicable: Value 11 already lifted the window, the distance, the ordering and the result card into shared parts precisely so this value would be a third query over them. There is nothing left to move.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The nearest-first lookup module as value 11 shaped it | producer | `src/domain/nearest-lookup.ts:1` | UNCHANGED_COMPATIBLE | Its window, distance and ordering rules are unchanged; it is applied to a second quantity with a second set of window sizes. |
+| The Lookup screen's tab strip | producer | `src/ui/lookup.ts:109` | UNCHANGED_COMPATIBLE | By food and By change keep their fields, chips and results. By start stops being refused and becomes selectable, which value 10's design explicitly declined to pin. |
+
+### Boundaries
+- Driving port: A person looking at a reading on their meter: enter it, pick how much slack, and see what they ate at about that level and where it landed.
+- Driven port: The log-store port's meal history.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The distance, the window and the ordering stay pure functions in src/domain over meals already read. The screen is a pure function of the result.
+- Failure: Condition: The meal history cannot be read because the server is unreachable. | Outcome: Retry | Observation: The screen shows 'Cannot reach the server. Try again.' with a usable retry control and no results, rather than an empty list that would read as nothing ever matching.
+- Failure: Condition: No meal's before reading falls within the window. | Outcome: Refusal | Observation: The results area says 'No meals within that window.' and the window chips stay usable.
+- Failure: Condition: A matched meal has no after reading. | Outcome: Indeterminate | Observation: It is listed with its dose and its before reading, and shows no change and no change band, because where it started is what was asked and an unmeasured ending must not be drawn as one.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: Lookup by start: entering a starting reading and a window (±5, ±10, ±20) lists past meals whose before reading was nearest, nearest first, each showing dose, before → after, the change and how far off it was.
+
+Stimulus: Account A owns seven meals, each on its own day within the last two weeks, every reading, change and dose distinct. One day ago: 145 to 180, 6 units. Two days ago: 148 to 172, 7 units. Three days ago: 142 to 175, 2 units. Four days ago: a before reading of 146 and NO after reading, 8 units. Five days ago: 138 to 165, 5 units. Six days ago: 160 to 190, 9 units. Seven days ago: 200 to 240, 4 units. A browser at a 360 px viewport signs in, opens Lookup, selects the 'By start' tab, enters 145 as the starting reading, and reads the results at plus or minus 5, then at plus or minus 10, then at plus or minus 20, then enters 900.
+
+Expected: At plus or minus 5 four meals are listed, nearest first: the 145 meal reading 'exact'; the 146 meal reading '1 off', shown with its dose and its before reading and NO change and no change band; then the 148 meal and the 142 meal, both reading '3 off', with the 148 meal first because it is the newer of the two. At plus or minus 10 the 138 meal joins them last, reading '7 off'. At plus or minus 20 the 160 meal joins last, reading '15 off'. The 200 meal is absent in every window. Every result with both readings shows its dose, its two readings and its change with the band the rule gives: +35 rose for the 145 meal, +24 stable for the 148, +33 rose for the 142, +27 stable for the 138 and +30 stable for the 160. With 900 entered the results area reads 'No meals within that window.' Opening the first result shows that meal's detail. The page never scrolls horizontally.
+
+Falsifier: A meal outside the window is listed, or one inside it is missing, or the order is not distance first and newer first on a tie, or a distance is wrong or signed or reads '0 off' for an exact match, or a meal with no before reading is listed, or a meal with no after reading is omitted or shown with a change, or a result omits its dose or its readings or carries the wrong change band, or a result does not open its meal, or the window sizes are not plus or minus 5, 10 and 20, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/lookup-by-start.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/lookup-by-start.spec.ts`
+Verification command: `npm run test:acceptance`
