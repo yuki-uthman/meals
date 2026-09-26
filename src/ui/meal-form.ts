@@ -7,7 +7,13 @@ import {
   type ExerciseContext,
   type MealSlot,
 } from '../domain/entry';
+import {
+  EXPECTED_AFTER_LABEL,
+  expectedAfterView,
+  type ExpectedAfterView,
+} from '../domain/expected-after';
 import { repeatSourceText, type FoodDraft, type MealDraft } from '../domain/meal-draft';
+import type { MealInstance } from '../domain/meal-identity';
 import type { ReadingChip } from '../domain/recent-readings';
 import { attachNumberPad, forgetOpenPad } from './number-pad';
 import { doseStepper } from './stepper';
@@ -262,6 +268,18 @@ export type MealFormState = {
   readonly padTarget?: MealPadTarget;
   /** Absent where nothing was recorded to put on a chip. */
   readonly chips?: MealPadChips;
+  /**
+   * Every meal this account has recorded, which is the material the expected-after
+   * estimate is read off. Absent reads as no history at all, and the panel then
+   * says there is no occasion on record rather than showing a number.
+   */
+  readonly history?: readonly MealInstance[];
+  /**
+   * Present when the history could not be read. The panel says so instead of a
+   * reason of its own: 'no occasion on record' would be a claim about the person's
+   * meals, and a read that failed says nothing whatever about them.
+   */
+  readonly historyMessage?: string | null;
   /** A refusal or retry message, shown in place with every value still filled in. */
   readonly message: string | null;
 };
@@ -344,6 +362,42 @@ const foodList = (state: MealFormState, handlers: MealFormHandlers): HTMLElement
   return section;
 };
 
+/**
+ * The panel's contents for one view: either the number with the band of the change
+ * it was built from and the occasion it came from, or the reason there is none.
+ *
+ * The estimate is never written into the after reading field: the person records
+ * what they measured, not what was expected.
+ */
+const expectedAfterBody = (view: ExpectedAfterView): readonly HTMLElement[] => {
+  const label = document.createElement('p');
+  label.className = 'expected-after__label';
+  label.textContent = EXPECTED_AFTER_LABEL;
+
+  if (view.kind === 'reason') {
+    const reason = document.createElement('p');
+    reason.className = 'expected-after__reason';
+    reason.textContent = view.message;
+    return [label, reason];
+  }
+
+  const line = document.createElement('p');
+  line.className = 'expected-after__line';
+  const value = document.createElement('span');
+  value.className = 'expected-after__value';
+  value.textContent = view.reading;
+  // Derived rather than recorded, so it carries its band by name and no data-entry
+  // mark: the stylesheet binds the colour to the band exactly as everywhere else.
+  value.setAttribute('data-change-band', view.band);
+  line.append(value);
+
+  const source = document.createElement('p');
+  source.className = 'expected-after__source';
+  source.textContent = view.source;
+
+  return [label, line, source];
+};
+
 export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTMLElement => {
   const screen = formScreen('form--meal');
   const { draft } = state;
@@ -351,6 +405,52 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
   const padTarget = state.padTarget ?? null;
   const openPad = (target: Exclude<MealPadTarget, null>): void => handlers.onOpenPad?.(target);
   const closePad = (): void => handlers.onClosePad?.();
+
+  // The panel is live: the slot, the before reading and the dose all change what it
+  // says, and none of them redraws the form. So this screen keeps its own copy of
+  // the draft as it is edited and repaints just the panel, which leaves every input
+  // -- and the caret in it -- exactly where it was.
+  let live = state.draft;
+  const history = state.history ?? [];
+  const panel = document.createElement('section');
+  panel.className = 'expected-after';
+  panel.setAttribute('aria-label', EXPECTED_AFTER_LABEL);
+  const historyMessage = state.historyMessage ?? null;
+  const paintPanel = (): void => {
+    panel.replaceChildren(
+      ...expectedAfterBody(
+        historyMessage === null
+          ? expectedAfterView(live, history)
+          : { kind: 'reason', message: historyMessage },
+      ),
+    );
+  };
+  paintPanel();
+
+  /** Records the change the same way the form always has, then repaints the panel. */
+  const andRepaint = <T>(change: (value: T) => Partial<MealDraft>, report: (value: T) => void) => (
+    value: T,
+  ): void => {
+    live = { ...live, ...change(value) };
+    report(value);
+    paintPanel();
+  };
+
+  const onSlot = andRepaint<MealSlot>((slot) => ({ slot }), handlers.onSlot);
+  const onGlucoseBefore = andRepaint<string>(
+    (glucoseBefore) => ({ glucoseBefore }),
+    handlers.onGlucoseBefore,
+  );
+  const onInsulinUnits = andRepaint<string>(
+    (insulinUnits) => ({ insulinUnits }),
+    handlers.onInsulinUnits,
+  );
+
+  // A panel needs foods to identify the meal by, and it belongs on ANY entry that
+  // has them: the rule does not depend on how the foods got into the draft, so
+  // somebody who typed them by hand is told the same thing as somebody who
+  // repeated a meal.
+  const hasFoods = draft.foods.some((food) => food.name.trim() !== '');
 
   if (state.message !== null) screen.append(notice(state.message));
 
@@ -371,7 +471,7 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       'Slot',
       MEAL_SLOTS.map((slot) => ({ value: slot, label: slotLabel(slot) })),
       draft.slot,
-      handlers.onSlot,
+      onSlot,
     ),
     timeField('meal-time', draft.time, handlers.onTime),
     numberField(
@@ -379,7 +479,7 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       'Glucose before',
       'glucose',
       draft.glucoseBefore,
-      handlers.onGlucoseBefore,
+      onGlucoseBefore,
       {
         pad: {
           chips: chips.before,
@@ -395,7 +495,7 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       'Rapid-acting units',
       'dose',
       draft.insulinUnits,
-      handlers.onInsulinUnits,
+      onInsulinUnits,
       { stepper: true },
     ),
     choiceGroup<ExerciseContext>(
@@ -409,6 +509,9 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       handlers.onExerciseContext,
     ),
     noteField('meal-note', draft.note, handlers.onNote),
+    // The panel sits beside the after reading, because that is the number it is
+    // about -- and it only ever reports beside it, never into it.
+    ...(hasFoods ? [panel] : []),
     // The after reading is optional and often arrives later: a person has only
     // just eaten when they record the meal. It sits last for that reason.
     numberField(

@@ -22,7 +22,7 @@ import {
   type Meal,
   type MealSlot,
 } from './domain/entry';
-import { instancesOf, type InstanceRow } from './domain/meal-identity';
+import { instancesOf, type InstanceRow, type MealInstance } from './domain/meal-identity';
 import {
   emptyFoodDraft,
   foodDraftRefusal,
@@ -115,6 +115,15 @@ const start = (): void => {
    * after the person had already started keying would be a moving target.
    */
   let recentMeals: readonly RecentMeal[] = [];
+  /**
+   * Every meal this account has recorded, which is what the expected-after estimate
+   * is read off. It is fetched before a meal form is shown, for the same reason the
+   * chips are: an estimate that appeared after the person had begun keying would be
+   * a moving target. Which meal the estimate is built from is the domain's rule.
+   */
+  let mealHistory: readonly MealInstance[] = [];
+  /** Why the history could not be read, so the panel never claims nothing happened. */
+  let mealHistoryMessage: string | null = null;
   /** Which field the in-app pad is open on. Closed unless a glucose field asked. */
   let padTarget: MealPadTarget = null;
   let nightPadOpen = false;
@@ -177,7 +186,14 @@ const start = (): void => {
       { date, isToday: date === localToday(), form: { title: mealFormTitle(draft), busy: saving } },
       { ...dayHandlers, onCancel: () => leaveForm(), onSave: () => void saveMeal() },
       mealForm(
-        { draft, padTarget, chips: mealChips(draft), message: formMessage },
+        {
+          draft,
+          padTarget,
+          chips: mealChips(draft),
+          history: mealHistory,
+          historyMessage: mealHistoryMessage,
+          message: formMessage,
+        },
         {
           // Opening and closing the pad is a change to the field's own corner of
           // the screen, so it is recorded here and deliberately NOT re-rendered:
@@ -340,9 +356,27 @@ const start = (): void => {
     return true;
   };
 
+  /**
+   * The material the expected-after estimate is read off: every meal this account
+   * recorded. A read that failed costs the estimate and nothing else -- filling in a
+   * meal never waits on it -- but it is reported rather than swallowed, because an
+   * empty history and an unread one say very different things.
+   */
+  const loadMealHistory = async (): Promise<boolean> => {
+    const outcome = await logStore.mealHistory();
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return false;
+    }
+    mealHistory = outcome.kind === 'loaded' ? outcome.meals : [];
+    mealHistoryMessage = outcome.kind === 'loaded' ? null : outcome.message;
+    return true;
+  };
+
   const logSlot = async (slot: MealSlot): Promise<void> => {
     const opening = date;
     if (!(await loadRecentMeals(opening))) return;
+    if (!(await loadMealHistory())) return;
     // A step to another day while the read was in flight wins, exactly as it
     // does for the night screen.
     if (opening !== date) return;
@@ -366,6 +400,7 @@ const start = (): void => {
 
     const opening = date;
     if (!(await loadRecentMeals(opening))) return;
+    if (!(await loadMealHistory())) return;
     if (opening !== date) return;
 
     // Carrying the meal's id is what makes the save update this row, so adding the
@@ -393,6 +428,7 @@ const start = (): void => {
   const logAgain = async (source: Meal): Promise<void> => {
     const opening = localToday();
     if (!(await loadRecentMeals(opening))) return;
+    if (!(await loadMealHistory())) return;
 
     date = opening;
     mealDraft = repeatMealDraft(source, opening);
@@ -623,6 +659,10 @@ const start = (): void => {
     nightPadOpen = false;
     // Readings belong to the account that recorded them, so they go with it.
     recentMeals = [];
+    // So does the history an estimate would be built from: no estimate may ever be
+    // based on another account's meal.
+    mealHistory = [];
+    mealHistoryMessage = null;
     signInState = { ...emptySignInState, message };
     render();
   };
@@ -683,6 +723,9 @@ const start = (): void => {
     // A change of hands takes the previous person's readings with it: a chip must
     // never repeat a reading that belongs to somebody else.
     recentMeals = [];
+    // The same goes for the history an estimate would be built from.
+    mealHistory = [];
+    mealHistoryMessage = null;
     if (account === null) {
       render();
       return;

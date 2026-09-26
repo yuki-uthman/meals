@@ -644,6 +644,50 @@ label {
   accent-color: var(--accent);
 }
 
+/* The expected-after panel, beside the after reading field. It is drawn as a quiet
+   report rather than as a field: no border of the accent colour, no control in it,
+   nothing that could read as an offer or as something to accept. */
+.expected-after {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* The panel's name, as quiet as any other label on the form. */
+.expected-after__label {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.expected-after__line {
+  margin: 0;
+  font-size: 1.375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number carries the band of the change it was built from, and the colour is
+   bound to the published band name rather than written into the markup. */
+.expected-after__value {
+  font-weight: 600;
+}
+
+/* The occasion the estimate came from. It wraps at 360 px instead of widening. */
+.expected-after__source,
+.expected-after__reason {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
 .food-list {
   display: flex;
   flex-direction: column;
