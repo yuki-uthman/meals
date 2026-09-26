@@ -253,9 +253,12 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
     expect(editedText, `the edited Dinner card must read ${fragment}`).toContain(fragment);
   }
 
+  // 182 − 150 is +32. The brief puts stable at −39 to +30 and rose at +31 to +60, so
+  // +32 is rose. The boundary is read off the brief rather than guessed: an oracle
+  // that named the neighbouring band would let a wrong band rule pass as correct.
   const change = edited.locator('[data-change-band]');
   await expect(change, 'the edited card publishes one change band').toHaveCount(1);
-  await expect(change).toHaveAttribute('data-change-band', 'stable');
+  await expect(change).toHaveAttribute('data-change-band', 'rose');
   expect(await textOf(change), 'the change is signed').toContain('+32');
 
   expect(await scrollsHorizontally(phone)).toBe(false);
