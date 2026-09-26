@@ -1096,3 +1096,81 @@ Oracle target locator: `tests/acceptance/lookup-by-start.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/lookup-by-start.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 13: the two palettes and the phone width
+
+### Purpose
+Make the app look like the canvas it was designed from: the warm light palette and the warm dark palette, selected by the device setting, with the canvas's two typefaces, and every screen filling the width of a large Android phone with no horizontal scrolling from 360 px upward.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Light and dark palettes come from the canvas design reference and follow the device setting.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- The app never recommends a dose, and no colour may read as advice.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/ui/theme.css` | EXTEND | Replace the placeholder palette with the canvas's own tokens, both schemes, and set the two typefaces. |
+| `index.html` | EXTEND | Load the two typefaces and declare the supported colour schemes. |
+| `tests/acceptance/theme-and-width.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- The palette currently in theme.css is a placeholder invented while the screens were being built -- cool greys and a green accent -- and is NOT the canvas's. This value replaces it. The band colours already match the canvas and do not change.
+- Light palette, from the canvas: ground #F6F3EC, card #FFFFFF, ink #1C1A17, muted ink #625D53, hairline #E3DDD0, wash #F0ECE3, dashed edge #C9C2B3, accent #1F6F63, accent hover #175247, accent wash #E4EFEC, rise #A6540A, steady #2E7D4F.
+- Dark palette, from the canvas: ground #141311, card #1F1D1A, ink #F3EFE7, muted ink #A39C8F, hairline #332F2A, wash #2A2723, dashed edge #4A453D, accent #6FCBBA, accent hover #8FD8C8, accent wash #1E2E2B, rise #E8A15A, steady #6FCB8E.
+- A filled button keeps the deep teal #1F6F63 in BOTH schemes, as the canvas note says, so a white label stays readable on it. The lifted teal #6FCBBA is for links, icons and text accents in the dark, where it has the contrast, and never behind white text.
+- The eight band colours are identical in both schemes, deliberately, so the two themes read the same. A band states what happened, and it must not change its mind in the dark.
+- Two typefaces, as the canvas has them: Fraunces at weight 500 for headings and for the large numerals, and IBM Plex Sans at 400, 500 and 600 for everything else. Both are loaded from Google Fonts with a preconnect, and both declare a fallback -- Georgia and a serif stack behind Fraunces, system-ui and a sans stack behind IBM Plex Sans -- so the app is fully usable before the fonts arrive or if they never do.
+- The scheme is chosen by prefers-color-scheme and by nothing else. There is no in-app theme toggle: the brief says the site follows the device setting, and a toggle would be a second source of truth for the same question.
+- index.html declares <meta name='color-scheme' content='light dark'> so the browser's own form controls, scrollbars and the address bar follow the same scheme as the page, rather than a dark page carrying light native widgets.
+- The layout is fluid and fills the phone. The content has a 16 px side gutter and no maximum width below 640 px, so a 412 px or 480 px Android shows more content rather than a letterboxed column; beyond 640 px it centres, so a desktop browser is not one stretched line. No element has a fixed pixel width that could exceed the viewport.
+- The 390 px of the canvas artboards is a drawing frame, not a target. It is recorded here because the first version of the brief mistook it for one.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| theme tokens | `src/ui/theme.css:5` | REPLACE | The placeholder palette is replaced wholesale by the canvas's. Every screen already consumes these tokens by name, so no screen changes. |
+| band tokens | `src/ui/theme.css:26` | REUSE | They already carry the canvas's exact values and are correct in both schemes. |
+| #app width rule | `src/ui/theme.css:77` | EXTEND | The fluid width and the 640 px centring cap are already right; only the gutter is restated. |
+
+### Prefactoring
+Not applicable: Every screen already reads its colours from named tokens, which is exactly the seam this value needs. Changing the tokens changes the whole app without touching a screen.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The theme's named colour tokens, consumed by every screen | producer | `src/ui/theme.css:5` | UNCHANGED_COMPATIBLE | Every token keeps its name and its role; only its value changes. No screen's markup or class names move. |
+| Every existing oracle, as a consumer of the screens | consumer | `tests/acceptance/today-screen.spec.ts:262` | UNCHANGED_COMPATIBLE | They assert text, band NAMES and the absence of horizontal scrolling, none of which is a colour value. Asserting band names rather than hex was chosen in value 2 for exactly this moment. |
+
+### Boundaries
+- Driving port: A person opening the app on their phone: it looks like the design, in whichever scheme their phone is set to, and it fills their screen.
+- Driven port: The browser's prefers-color-scheme setting.
+- Driven port: Google Fonts over HTTPS for the two typefaces.
+- Dependency direction: Only theme.css and the document head are involved. No screen, domain rule or adapter depends on a colour, so the palette can be replaced without any of them knowing.
+- Failure: Condition: The typefaces cannot be fetched. | Outcome: Retry | Observation: Every screen renders in its fallback stack with the same sizes and weights, and nothing is unreadable or unusable. The browser retries the stylesheet on the next visit; the app never waits for it.
+- Failure: Condition: The device expresses no colour-scheme preference. | Outcome: Refusal | Observation: The light palette is used, because it is the scheme the canvas leads with and a page must commit to one.
+- Failure: Condition: A viewport narrower than 360 px. | Outcome: Indeterminate | Observation: The layout stays fluid and text wraps, but nothing below 360 px is claimed: the brief fixes 360 px as the narrowest width the app is judged at, and promising more than has been measured would be a claim without evidence.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: The site follows the device's light or dark setting using the two palettes from the canvas, and every screen fills the width of a large Android phone, with no horizontal scrolling at any viewport width from 360 px upward.
+
+Stimulus: Account A owns enough to populate every screen: two meals and a night record today, and a handful of earlier meals sharing a food. A browser loads the built bundle with the colour scheme set to light, then with it set to dark, and at each of the viewport widths 360, 412 and 480 px it visits the sign-in screen, Today, the meal form with the number pad open, the Add food screen, the night screen, a meal detail, History in each of its three views, and Lookup in each of its three tabs.
+
+Expected: With the scheme set to light the page's background is rgb(246, 243, 236) and its text colour is rgb(28, 26, 23). With it set to dark the background is rgb(20, 19, 17) and the text colour is rgb(243, 239, 231). A heading's computed font family names Fraunces ahead of its serif fallback and body text names IBM Plex Sans ahead of its sans fallback, in both schemes. A change band's colour is the same in both schemes. At every one of the three widths and in both schemes, every screen listed has a document scroll width no greater than its client width, and the main content spans the viewport's width less a 16 px gutter on each side rather than sitting in a narrower fixed column.
+
+Falsifier: A palette value is not the canvas's, or the scheme does not follow prefers-color-scheme, or a band colour differs between the two schemes, or a typeface is missing from a computed font family, or any listed screen scrolls horizontally at 360, 412 or 480 px in either scheme, or the content is confined to a column narrower than the viewport less its gutters on a 412 px or 480 px screen.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/theme-and-width.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/theme-and-width.spec.ts`
+Verification command: `npm run test:acceptance`
