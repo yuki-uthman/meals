@@ -10,6 +10,7 @@ import {
   type MealSlot,
   type NightCard,
 } from '../domain/entry';
+import { openMealLabel } from '../domain/meal-identity';
 import { OPEN_NIGHT_LABEL } from '../domain/night';
 
 // The reading surface: the signed-in account's own entries for one date, as the
@@ -30,6 +31,8 @@ export type DayLogHandlers = {
   readonly onEditMeal: (id: string) => void;
   /** The night card is the way in to the night screen, recorded or not. */
   readonly onOpenNight: () => void;
+  /** A logged card's body is the way in to that meal's detail. */
+  readonly onOpenMeal: (id: string) => void;
 };
 
 const paragraph = (className: string, text: string): HTMLElement => {
@@ -118,15 +121,41 @@ const editControl = (card: MealCard, onEditMeal: (id: string) => void): HTMLElem
   return control;
 };
 
+/**
+ * The card's body as the way into the meal's detail. It is a link rather than a
+ * button because it goes somewhere, and it holds exactly the elements the body
+ * held before -- the same foods, dose and readings, each still carrying its own
+ * data-entry mark -- so becoming a way in adds no words to the card and changes
+ * nothing about what it reads as. The Edit control stays where it was, in the
+ * head, and keeps its own name.
+ */
+const openLink = (card: MealCard, onOpenMeal: (id: string) => void): HTMLAnchorElement => {
+  const link = document.createElement('a');
+  link.className = 'card__open';
+  // A real destination, so this is a link to assistive technology and to the
+  // reader's own habits; the app takes it over rather than reloading.
+  link.href = `#meal/${card.id}`;
+  link.setAttribute('aria-label', openMealLabel(card.slot));
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    onOpenMeal(card.id);
+  });
+  return link;
+};
+
 const mealCardItem = (card: MealCard, handlers: DayLogHandlers): HTMLElement => {
   const item = cardItem('card--meal');
   const head = cardHead(card.label, recorded('p', 'card__time', card.time));
   head.append(editControl(card, handlers.onEditMeal));
   item.append(head);
-  if (card.foods !== null) item.append(recorded('p', 'card__foods', card.foods));
-  if (card.dose !== null) item.append(recorded('p', 'card__dose', card.dose));
+
+  const body = openLink(card, handlers.onOpenMeal);
+  if (card.foods !== null) body.append(recorded('p', 'card__foods', card.foods));
+  if (card.dose !== null) body.append(recorded('p', 'card__dose', card.dose));
   const row = readings(card);
-  if (row !== null) item.append(row);
+  if (row !== null) body.append(row);
+  item.append(body);
+
   return item;
 };
 

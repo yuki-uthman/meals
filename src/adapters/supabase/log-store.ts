@@ -4,11 +4,13 @@ import {
   MEAL_NOT_SAVED,
   type DayLogOutcome,
   type LogStore,
+  type MealHistoryOutcome,
   type NightWindowOutcome,
   type RecentMealsOutcome,
   type SaveMealOutcome,
   type SaveNightOutcome,
 } from '../../ports/log-store';
+import type { MealInstance } from '../../domain/meal-identity';
 import type { RecentMeal } from '../../domain/recent-readings';
 import { shiftDate } from '../../domain/entry';
 import type {
@@ -311,7 +313,48 @@ const toRecentFailure = (error: PostgrestError, status: number): RecentMealsOutc
     ? { kind: 'session-ended', message: SESSION_ENDED }
     : { kind: 'retry', message: UNREACHABLE_SERVER };
 
+/** A meal as the instance list reads it: the day it belongs to, and its foods. */
+const toMealInstance = (row: MealRow & { eaten_on?: unknown }): MealInstance => {
+  const foods = Array.isArray(row.meal_foods) ? (row.meal_foods as FoodRow[]) : [];
+  return {
+    id: String(row.id),
+    slot: String(row.slot) as MealSlot,
+    eatenOn: String(row.eaten_on),
+    eatenAt: new Date(String(row.eaten_at)),
+    glucoseBefore: asNumber(row.glucose_before),
+    glucoseAfter: asNumber(row.glucose_after),
+    insulinUnits: asNumber(row.insulin_units),
+    foods: [...foods].sort(byPosition).map(toFood),
+  };
+};
+
+/** And for the history read, read exactly the same way. */
+const toHistoryFailure = (error: PostgrestError, status: number): MealHistoryOutcome =>
+  isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+
 export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
+  mealHistory: async (): Promise<MealHistoryOutcome> => {
+    try {
+      // No user_id filter here either: row-level security is the only thing that
+      // decides whose meals an instance list can ever contain, so another
+      // account's meal is never sent rather than being filtered out afterwards.
+      const result = await client
+        .from('meals')
+        .select(MEAL_SELECT)
+        .order('eaten_on', { ascending: false })
+        .order('eaten_at', { ascending: false });
+      if (result.error !== null) return toHistoryFailure(result.error, result.status);
+      return {
+        kind: 'loaded',
+        meals: ((result.data ?? []) as MealRow[]).map(toMealInstance),
+      };
+    } catch {
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
   recentMeals: async (onOrBefore: IsoDate, count: number): Promise<RecentMealsOutcome> => {
     try {
       // No user_id filter here either: row-level security is the only thing that

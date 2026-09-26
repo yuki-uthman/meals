@@ -1,6 +1,7 @@
 import type { DayLog, IsoDate } from '../domain/entry';
 import type { MealRecording } from '../domain/meal-draft';
 import type { NightRecording, NightWindow } from '../domain/night';
+import type { MealInstance } from '../domain/meal-identity';
 import type { RecentMeal } from '../domain/recent-readings';
 
 // Reading the signed-in account's own entries for one date, and recording a meal.
@@ -60,8 +61,21 @@ export type RecentMealsOutcome =
   | { readonly kind: 'retry'; readonly message: string }
   | { readonly kind: 'session-ended'; readonly message: string };
 
+export type MealHistoryOutcome =
+  | { readonly kind: 'loaded'; readonly meals: readonly MealInstance[] }
+  /** The server could not be reached. The detail says so rather than claiming no history. */
+  | { readonly kind: 'retry'; readonly message: string }
+  | { readonly kind: 'session-ended'; readonly message: string };
+
 export type LogStore = {
   dayLog: (date: IsoDate) => Promise<DayLogOutcome>;
+  /**
+   * Every meal the signed-in account has recorded, with its foods, newest first.
+   * Which of them are instances of the same meal is the domain's rule and not
+   * this query's, because sameness is a multiset over the related food rows: the
+   * whole history comes back and the key is computed in one place.
+   */
+  mealHistory: () => Promise<MealHistoryOutcome>;
   /**
    * The `count` most recent meals on or before `onOrBefore`, newest first, with
    * just the readings a chip needs. Which of them is 'the last reading' is the

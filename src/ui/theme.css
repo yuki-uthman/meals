@@ -368,6 +368,197 @@ label {
   font-weight: 500;
 }
 
+/* The card body is the way into the meal's detail. It is styled back to being
+   the body it was: no underline, no link colour, the same column of lines at the
+   same spacing, so becoming a way in changes nothing about how the card reads. */
+.card__open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.card__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* -------------------------------------------------- the meal detail screen */
+
+.detail-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.detail,
+.instances {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+.detail__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* The slot label is furniture, exactly as it is on a card. */
+.detail__slot {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.detail__when,
+.detail__dose,
+.detail__note,
+.detail__readings {
+  margin: 0;
+}
+
+.detail__when {
+  font-variant-numeric: tabular-nums;
+}
+
+.detail__readings {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail__arrow {
+  color: var(--ink-muted);
+}
+
+/* The change is the judgement, so it is the only banded thing here, and its
+   colour is bound to the published band name rather than written into markup. */
+.detail__change,
+.instance__change {
+  font-weight: 600;
+}
+
+.detail__dose {
+  color: var(--ink-muted);
+}
+
+.detail__foods {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* A food reads as its name, its type and its amount, wrapping rather than
+   widening, so nothing pushes the document sideways at 360 px. */
+.detail__food {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.detail__food-name {
+  font-weight: 600;
+}
+
+.detail__food-type {
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
+.detail__food-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+.detail__note {
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.instances__heading {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.instances__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* One instance per row: when it was, the dose, the two readings and the change.
+   The row wraps at narrow widths instead of widening. */
+.instance {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.instance__date {
+  color: var(--ink-muted);
+}
+
+.instance__slot {
+  color: var(--ink-muted);
+}
+
+.instance__dose {
+  font-weight: 600;
+}
+
+/* The row being looked at. The border says it quietly and the word beside it
+   says it outright, so the mark is never carried by colour alone. Deliberately
+   no text-transform: the mark is read as the word the domain produced. */
+.instance--viewing {
+  border-color: var(--accent);
+}
+
+.instance__mark {
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  color: var(--accent);
+  font-size: 0.8125rem;
+}
+
 /* ---------------------------------------------------------------- forms */
 
 .button--save {

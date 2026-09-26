@@ -19,8 +19,10 @@ import {
   type ExerciseContext,
   type FoodType,
   type IsoDate,
+  type Meal,
   type MealSlot,
 } from './domain/entry';
+import { instancesOf, type InstanceRow } from './domain/meal-identity';
 import {
   emptyFoodDraft,
   foodDraftRefusal,
@@ -52,6 +54,7 @@ import {
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { FOOD_FORM_TITLE, foodForm } from './ui/food-form';
+import { mealDetailScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { shell, type ShellHandlers } from './ui/shell';
@@ -82,7 +85,15 @@ const start = (): void => {
   let readToken = 0;
 
   /** Which screen the signed-in person is on. Today unless a meal is being filled in. */
-  let screen: 'day' | 'meal' | 'food' | 'night' = 'day';
+  let screen: 'day' | 'meal' | 'food' | 'night' | 'detail' = 'day';
+  /**
+   * The meal being looked at, and every instance of its foods. Both are held
+   * here rather than in the screen, for the same reason a draft is: the screen
+   * is a pure function of them and outlives no redraw of its own.
+   */
+  let detailMeal: Meal | null = null;
+  let detailInstances: readonly InstanceRow[] = [];
+  let detailMessage: string | null = null;
   let mealDraft: MealDraft | null = null;
   let foodDraft: FoodDraft | null = null;
   let nightDraft: NightDraft | null = null;
@@ -119,7 +130,18 @@ const start = (): void => {
         onLogSlot: (slot) => void logSlot(slot),
         onEditMeal: (id) => void editMeal(id),
         onOpenNight: () => void openNight(),
+        onOpenMeal: (id) => void openMealDetail(id),
       }),
+    );
+
+  const detailScreen = (meal: Meal): HTMLElement =>
+    shell(
+      { date, isToday: date === localToday() },
+      dayHandlers,
+      mealDetailScreen(
+        { meal, instances: detailInstances, message: detailMessage },
+        { onBack: () => backToDay() },
+      ),
     );
 
   /** The readings a chip may repeat, never a number this app worked out. */
@@ -215,6 +237,7 @@ const start = (): void => {
     if (screen === 'night' && nightDraft !== null && nightHistory !== null) {
       return nightScreen(nightDraft, nightHistory);
     }
+    if (screen === 'detail' && detailMeal !== null) return detailScreen(detailMeal);
     if (screen === 'food' && foodDraft !== null) return foodScreen(foodDraft);
     if (screen === 'meal' && mealDraft !== null) return mealScreen(mealDraft);
     return todayScreen();
@@ -342,7 +365,56 @@ const start = (): void => {
     render();
   };
 
+  const clearDetail = (): void => {
+    detailMeal = null;
+    detailInstances = [];
+    detailMessage = null;
+  };
+
+  /**
+   * The meal detail, reached from a card's body on Today. The whole history is
+   * read through the port and the domain decides which of those meals are
+   * instances of these foods, so the rule for sameness is not buried in a query.
+   * A history that could not be read says so rather than reading as a meal eaten
+   * once.
+   */
+  const openMealDetail = async (id: string): Promise<void> => {
+    if (dayLogState.kind !== 'loaded') return;
+    const meal = dayLogState.log.meals.find((candidate) => candidate.id === id);
+    if (meal === undefined) return;
+
+    const opening = date;
+    const outcome = await logStore.mealHistory();
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return;
+    }
+    // A step to another day while the read was in flight wins, exactly as it
+    // does everywhere else a screen is opened after a read.
+    if (opening !== date) return;
+
+    detailMeal = meal;
+    detailInstances =
+      outcome.kind === 'loaded' ? instancesOf(outcome.meals, meal.foods, meal.id) : [];
+    detailMessage = outcome.kind === 'loaded' ? null : outcome.message;
+    mealDraft = null;
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    screen = 'detail';
+    render();
+  };
+
+  const backToDay = (): void => {
+    clearDetail();
+    screen = 'day';
+    render();
+  };
+
   const leaveForm = (): void => {
+    clearDetail();
     mealDraft = null;
     foodDraft = null;
     nightDraft = null;
@@ -478,6 +550,9 @@ const start = (): void => {
     await identity.signOut();
     account = null;
     screen = 'day';
+    // A meal and its history belong to the account that recorded them, so they
+    // go with it rather than staying on screen for whoever signs in next.
+    clearDetail();
     mealDraft = null;
     foodDraft = null;
     nightDraft = null;
@@ -536,6 +611,7 @@ const start = (): void => {
     // A draft belongs to the person who was filling it in, so a change of hands
     // takes it with it rather than offering it to whoever signs in next.
     screen = 'day';
+    clearDetail();
     mealDraft = null;
     foodDraft = null;
     nightDraft = null;
