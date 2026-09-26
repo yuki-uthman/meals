@@ -18,9 +18,16 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  * It deliberately judges the recording through the SAVED CARD rather than through the
  * form's widgets: that the dinner slot was pre-chosen, that the two foods and their
  * amounts were written, that the dose and the before reading were written, and that the
- * edit updated one row instead of writing a second. Field widgets are located by their
- * labels tolerantly, because a label's exact wording is a presentation choice while the
- * field itself -- 'glucose before', 'amount', 'note' -- is what the brief fixes.
+ * edit updated one row instead of writing a second.
+ *
+ * Every field is located by its EXACT label -- 'Slot', 'Time', 'Glucose before',
+ * 'Rapid-acting units', 'Exercise', 'Note', 'Glucose after' on the meal form and 'Food',
+ * 'Type', 'Amount', 'Unit' on the Add food screen -- never by a loose word or an
+ * alternation. A pattern like /units|dose/i is unique only by accident of what exists
+ * today: value 5 puts 'Decrease dose' and 'Increase dose' beside the dose field, and the
+ * pattern would then resolve to three elements and fail against a correct product. On one
+ * screen a label and a control name must be distinguishable by exact match, and this
+ * oracle asserts through that exact match so it keeps its meaning for the whole delivery.
  */
 
 const PHONE_VIEWPORT = { width: 360, height: 780 } as const;
@@ -150,9 +157,9 @@ type Food = {
 const addFood = async (page: Page, food: Food): Promise<void> => {
   await page.getByRole('button', { name: /add food/i }).click();
 
-  await page.getByLabel(/^\s*(food\s*)?name\s*$/i).fill(food.name);
+  await page.getByLabel('Food', { exact: true }).fill(food.name);
   await chooseOption(page, food.type);
-  await page.getByLabel(/amount/i).fill(food.amount);
+  await page.getByLabel('Amount', { exact: true }).fill(food.amount);
   await chooseOption(page, food.unit);
 
   await save(page);
@@ -179,15 +186,15 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
 
   await logFromEmptyCard(phone, 'Dinner');
 
-  await phone.getByLabel(/time/i).fill('19:10');
-  await phone.getByLabel(/glucose before/i).fill('150');
+  await phone.getByLabel('Time', { exact: true }).fill('19:10');
+  await phone.getByLabel('Glucose before', { exact: true }).fill('150');
 
   await addFood(phone, { name: 'Chicken rice', type: 'Mixed dish', amount: '250', unit: 'g' });
   await addFood(phone, { name: 'Cucumber salad', type: 'Vegetable', amount: '80', unit: 'g' });
 
-  await phone.getByLabel(/units|dose/i).fill('6');
+  await phone.getByLabel('Rapid-acting units', { exact: true }).fill('6');
   await chooseOption(phone, 'Before meal');
-  await phone.getByLabel(/note/i).fill('walked home');
+  await phone.getByLabel('Note', { exact: true }).fill('walked home');
 
   // No after reading: the person has only just eaten, and the product must still
   // record what they ate.
@@ -229,10 +236,10 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
 
   // The recorded values are in place, so a later edit cannot quietly drop what was
   // already written.
-  await expect(phone.getByLabel(/glucose before/i)).toHaveValue('150');
-  await expect(phone.getByLabel(/time/i)).toHaveValue(/19:10/);
-  await expect(phone.getByLabel(/units|dose/i)).toHaveValue('6');
-  await expect(phone.getByLabel(/note/i)).toHaveValue('walked home');
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('150');
+  await expect(phone.getByLabel('Time', { exact: true })).toHaveValue(/19:10/);
+  await expect(phone.getByLabel('Rapid-acting units', { exact: true })).toHaveValue('6');
+  await expect(phone.getByLabel('Note', { exact: true })).toHaveValue('walked home');
 
   const form = await textOf(phone.locator('body'));
   for (const fragment of ['Chicken rice', 'Cucumber salad', 'Before meal']) {
@@ -242,7 +249,7 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
   expect(form.toLowerCase(), 'the reopened foods keep their types').toContain('mixed dish');
   expect(form.toLowerCase(), 'the reopened foods keep their types').toContain('vegetable');
 
-  await phone.getByLabel(/glucose after/i).fill('182');
+  await phone.getByLabel('Glucose after', { exact: true }).fill('182');
   await save(phone);
 
   // The same single dinner, updated: adding the after reading must not produce a
@@ -272,8 +279,8 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
 
   // Refused in place: the form is still on screen with its fields, so nothing the
   // person typed was thrown away by the refusal.
-  await expect(phone.getByLabel(/glucose before/i)).toBeVisible();
-  await expect(phone.getByLabel(/time/i)).toBeVisible();
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toBeVisible();
+  await expect(phone.getByLabel('Time', { exact: true })).toBeVisible();
 
   await phone.getByRole('button', { name: /^cancel$/i }).click();
 
