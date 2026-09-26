@@ -390,3 +390,95 @@ Oracle target locator: `tests/acceptance/night-insulin.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/night-insulin.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 5: the in-app number pad and the dose stepper
+
+### Purpose
+Make glucose and dose entry a one-thumb job: tapping a glucose field opens an in-app number pad carrying chips for the readings the person is most likely to want, and a dose moves by exactly one unit with a minus and a plus button.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- The app never recommends a dose. A chip repeats a reading the person already took; the stepper only moves a number the person is choosing.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/recent-readings.ts` | CREATE_NEW | Which readings become chips, as pure functions over what the account already recorded. |
+| `src/domain/number-entry.ts` | CREATE_NEW | The digit, delete and clear rules and the one-unit step, as pure functions, so the keying behaviour is testable without a DOM. |
+| `src/ports/log-store.ts` | EXTEND | Add reading the values the chips need: the most recent glucose reading, and the before reading of the most recent meal in a slot. |
+| `src/adapters/supabase/log-store.ts` | EXTEND | Read those two values through PostgREST, still with no user_id of its own. |
+| `src/ui/number-pad.ts` | CREATE_NEW | The pad itself: the chips, the digits, Clear, Delete and Done. |
+| `src/ui/stepper.ts` | CREATE_NEW | The minus and plus control a dose field carries. |
+| `src/ui/meal-form.ts` | EXTEND | Its two glucose fields open the pad and its dose field gains the stepper. |
+| `src/ui/night-form.ts` | EXTEND | Its bedtime glucose opens the pad and its dose gains the stepper. |
+| `src/ui/theme.css` | EXTEND | Pad, chip, key and stepper tokens in both palettes. |
+| `src/main.ts` | EXTEND | Supply the chip readings to the forms that open the pad. |
+| `tests/acceptance/number-pad.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- The pad writes into the very input value 3 declared. That input is NEVER made readonly and never loses its label, because value 3's oracle fills it directly and a readonly field would fail that oracle while looking like a product improvement.
+- A glucose input carries inputmode='none' so a phone shows no system keyboard and the in-app pad has the screen to itself. It stays an ordinary focusable text input, so a hardware keyboard and an automated fill both still work. This is how the pad replaces the system keyboard without replacing the field.
+- Tapping or focusing a glucose field opens the pad. The pad is one group with the accessible name 'Number pad', holding the digits 0 to 9, a 'Clear' control, a 'Delete' control and a 'Done' control. Done closes the pad and leaves the value in the field.
+- A digit appends to the right. Delete removes the rightmost digit. Clear empties the field. The pad accepts at most three digits, because a mg/dL reading above 999 is not a reading; the schema's wider bound stays as a guard rather than as an invitation.
+- Two chips, when there is something to put in them. 'Last reading 133 · 12:55' is the most recent glucose value the account recorded, with the time of the entry it came from; a meal's after reading counts as later than its before reading, since both hang off the meal's own time. 'Before last dinner 110' is the before reading of the most recent meal in the slot being recorded. A chip with no reading behind it is not rendered at all rather than rendered empty.
+- Tapping a chip puts its number in the field, replacing whatever was there. It does not close the pad, so a mistaken tap is one Clear away.
+- A dose field carries a minus and a plus button, named 'Decrease dose' and 'Increase dose', each moving the dose by exactly one unit. The dose never goes below zero: minus at zero does nothing. The dose input stays typeable, so a dose of 12 does not need twelve taps.
+- The night screen's dose and bedtime glucose get the same two controls, because a person keying a number at 22:30 wants the same thumb-sized target as at noon.
+- The food amount field keeps the system keyboard. The brief asks for the pad on glucose fields and the stepper on doses, and an amount in grams is not either of those.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| LogStore | `src/ports/log-store.ts:34` | EXTEND | The chips are reads, and every read goes through the one boundary. |
+| clockTime | `src/domain/entry.ts:50` | REUSE | The chip's time is the same local HH:MM the cards show. |
+| slotLabel | `src/domain/entry.ts:47` | REUSE | 'Before last dinner' names the slot the way every other screen names it. |
+| mealForm | `src/ui/meal-form.ts:1` | EXTEND | The fields already exist and keep their labels; only their input method changes. |
+| nightForm | `src/ui/night-form.ts:1` | EXTEND | Same two controls on the same kinds of field, rather than a second spelling of them. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/record-a-meal.spec.ts`
+
+Move: Before the pad exists, lift each numeric field in the meal and night forms into one field helper that owns its label, its input and its trailing controls, so the pad and the stepper attach in one place rather than at five call sites.
+
+Preserved observation: A meal is still recorded from an empty slot with its foods, dose, readings, context and note, still shows on Today, and still reopens to take the after reading. Its fields keep their labels and stay fillable.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The labelled numeric fields of the meal and night forms | producer | `src/ui/meal-form.ts:1` | UNCHANGED_COMPATIBLE | Labels, accessible names and values are unchanged. The fields gain a companion control and lose the system keyboard, which no existing oracle depends on. |
+| The record-a-meal and night-insulin oracles as consumers of those fields | consumer | `tests/acceptance/record-a-meal.spec.ts:165` | UNCHANGED_COMPATIBLE | They fill fields by label and read values back; inputmode is not something they assert and readonly is forbidden by decision. |
+
+### Boundaries
+- Driving port: A person keying a number with one thumb: tap a glucose field, take a chip or key the digits, correct a slip, finish; step a dose up or down one unit at a time.
+- Driven port: The log-store port for the two chip readings.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The keying rules and the chip projections are pure functions in src/domain with no DOM and no SDK. The pad and the stepper are pure functions of state plus handlers.
+- Failure: Condition: A fourth digit is keyed. | Outcome: Refusal | Observation: The field keeps its three digits and the extra key does nothing, because a reading above 999 is not a reading.
+- Failure: Condition: Delete is used on an empty field. | Outcome: Refusal | Observation: The field stays empty and nothing else changes.
+- Failure: Condition: Decrease is used on a dose of zero. | Outcome: Refusal | Observation: The dose stays at zero, because a negative dose is not a thing that can be taken.
+- Failure: Condition: The chip readings cannot be read because the server is unreachable. | Outcome: Retry | Observation: The pad opens with its digits working and no chips at all, because keying the number by hand must never be blocked by a convenience that failed to load.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: Tapping a glucose field opens an in-app number pad with chips for the last reading; dose fields change by one unit with minus and plus buttons.
+
+Stimulus: Account A owns a lunch today at 12:55 with before 112 and after 133, and a dinner yesterday at 19:10 with before 110. A browser at a 360 px viewport signs in, opens New meal from the Dinner slot's 'Not logged yet' card, and taps the glucose before field. It then keys 1, 5 and 0, keys a fourth digit 7, uses Delete, uses Clear, taps the 'Before last dinner 110' chip, and uses Done. It then uses Increase dose three times and Decrease dose once, and on a separate attempt uses Decrease dose on a dose of zero.
+
+Expected: Tapping the field reveals a group named 'Number pad' carrying a chip reading 'Last reading 133 · 12:55' and a chip reading 'Before last dinner 110'. Keying 1, 5, 0 puts 150 in the field. The fourth digit leaves it at 150. Delete leaves 15. Clear leaves it empty. The chip puts 110 in the field and the pad stays open. Done closes the pad and the field still holds 110. Three Increase presses make the dose 3 and one Decrease makes it 2. Decrease on a dose of zero leaves it at zero. The page never scrolls horizontally.
+
+Falsifier: The pad does not appear on tapping the field, or either chip is absent or carries the wrong number or time, or a digit does not append, or a fourth digit is accepted, or Delete does not remove exactly the rightmost digit, or Clear does not empty the field, or a chip does not fill the field or closes the pad, or Done does not close the pad or loses the value, or a step moves the dose by anything other than one, or the dose goes below zero, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/number-pad.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/number-pad.spec.ts`
+Verification command: `npm run test:acceptance`
