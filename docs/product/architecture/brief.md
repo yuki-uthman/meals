@@ -304,3 +304,88 @@ Oracle target locator: `tests/acceptance/record-a-meal.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/record-a-meal.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 4: recording night insulin
+
+### Purpose
+Let the person record the night's long-acting dose, its time and the bedtime glucose, and show the last five nights as dose and next-morning reading so the effect of a basal change is visible.
+
+### Constraints
+- The front end is a static bundle only; the browser writes through the Supabase JS client and there is no server process.
+- Row-level security stays the only thing that scopes a read or a write.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- Night insulin is a separate daily record, not a meal.
+- The app never recommends a dose. The five-night list reports what happened and draws no conclusion from it.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/night.ts` | CREATE_NEW | The night draft, the five-night projection and the next-morning derivation, as pure functions testable without a browser. |
+| `src/ports/log-store.ts` | EXTEND | Add saving a night record and reading the recent nights with their following mornings. |
+| `src/adapters/supabase/log-store.ts` | EXTEND | Write the night row and read the nights and the meals whose earliest reading supplies each morning. |
+| `src/ui/night-form.ts` | CREATE_NEW | The Night insulin screen: the dose, the time, the bedtime glucose and the last five nights. |
+| `src/ui/day-log.ts` | EXTEND | The night insulin card becomes the way into that screen. |
+| `src/ui/theme.css` | EXTEND | The night screen's dark surface and the level band tokens, in both palettes. |
+| `src/main.ts` | EXTEND | Route to the night screen and re-read the day after a save. |
+| `tests/acceptance/night-insulin.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- The night screen is reached from the night insulin card on Today, and records against the date the Today screen is reading. The schema already holds one night record per account per date, so saving a second time updates that night rather than adding another.
+- The next-morning reading is DERIVED, not recorded: it is the glucose before the earliest meal recorded on the following calendar date. The brief's list of what the person records for a night is the dose, the time and the bedtime glucose, and nothing else, so asking for a separate morning value would be work the brief does not ask for. A night whose following date has no meal with a before reading shows an em dash and carries no band.
+- The five-night list shows the five most recent nights strictly before the date being recorded, newest first. Each row is the short date as 'Mon 21', the dose as '18 u', and the next-morning reading as a whole number.
+- The next-morning reading is coloured by LEVEL, not by change, because the question a basal dose answers is whether you woke up in range. This is the first use of the level bands src/domain/band.ts already holds, and they are published as data-level-band exactly as the change bands are published as data-change-band.
+- The canvas paints a morning reading of 76 in a warning colour. The brief's level bands put 70 to 180 in range, so 76 is in-range here. The brief's rule wins over the mock-up's shade, and that is deliberate rather than an oversight.
+- The dose, the time and the bedtime glucose are real labelled inputs, as value 3 settled for every numeric field. Value 5 adds the minus and plus stepper and the in-app number pad as controls that write into these same inputs, so a field keeps one accessible name and one value for the whole delivery.
+- The dose is required; the time and the bedtime glucose are optional, because a person who took their basal and did not measure must still be able to record the dose.
+- Saving returns to Today for the same date and the day is re-read, so the night card shows what the store holds.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| LogStore | `src/ports/log-store.ts:34` | EXTEND | One boundary for every read and write; a second port would let a screen reach the database two ways. |
+| NightInsulin | `src/domain/entry.ts:26` | REUSE | The night row the day log already reads is the row this screen writes. |
+| nightInsulinLine | `src/domain/entry.ts:105` | REUSE | '18 u at 22:30' is already the night card's dose line and does not change. |
+| levelBand | `src/domain/band.ts:1` | REUSE | The level bands were written for History in value 9; the morning reading is the first thing to need them and must not get a second copy of the rule. |
+| dayLogSection | `src/ui/day-log.ts:59` | EXTEND | The night card it already draws becomes the entry point; the reading does not change. |
+
+### Prefactoring
+Not applicable: The seams this value needs already exist: the log-store port takes writes since value 3, the shell carries a Cancel and Save header, and the band rules are already factored out. There is nothing to move first.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The night_insulin table, its unique night per account and its row-level security | producer | `supabase/migrations/0001_owner_scoped_schema.sql:59` | UNCHANGED_COMPATIBLE | The table already holds every column this value writes, including the one-night-per-date uniqueness the update relies on. No migration. |
+| The log-store port | consumer | `src/ports/log-store.ts:34` | UNCHANGED_COMPATIBLE | dayLog and saveMeal keep their signatures; the night operations are added beside them. |
+
+### Boundaries
+- Driving port: A person recording the night dose: open the night card, set the units, the time and the bedtime reading, save, and read the last five nights to see what each dose was followed by.
+- Driven port: The log-store port for writing the night record and reading the recent nights with their following mornings.
+- Driven port: The identity port, unchanged, for the session the write runs as.
+- Dependency direction: The night screen is a pure function of a draft and a five-night projection; the projection and the derivation live in src/domain and import nothing.
+- Failure: Condition: Save is used with no dose entered. | Outcome: Refusal | Observation: The screen stays, shows 'Enter the dose.', and nothing is written.
+- Failure: Condition: The server cannot be reached while saving. | Outcome: Retry | Observation: The screen keeps every value entered, shows 'Cannot reach the server. Try again.', and the Save control becomes usable again.
+- Failure: Condition: The five-night read fails. | Outcome: Retry | Observation: The list shows 'Cannot reach the server. Try again.' with a usable retry control, and shows no nights rather than stale ones. The dose the person is entering is untouched.
+- Failure: Condition: A night has no meal with a before reading on the following date. | Outcome: Indeterminate | Observation: The row shows the dose and an em dash for the morning, and carries no level band, because no reading was taken and a missing measurement must not be drawn as a value.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: The user records night insulin (long-acting units, time, bedtime glucose); the screen lists the last five nights as dose and next-morning reading.
+
+Stimulus: Account A owns five night records, dated one to five days before today in local terms, with doses 18, 18, 16, 16 and 20 units in that order from most recent. It also owns one meal on each of the four days before today, whose earliest before reading is 106 on yesterday, 190 two days ago, 64 three days ago and 260 four days ago. Today has no night record and no meal. A browser at a 360 px viewport signs in as account A, opens the night insulin card from Today, and records 18 units at 22:30 with bedtime glucose 128, then saves.
+
+Expected: The night screen lists exactly five rows, newest first. The first is yesterday's night, '18 u', and an em dash for the morning with no level band, because today has no reading. The second is '18 u' with '106' in the in-range level band. The third is '16 u' with '190' in the high band. The fourth is '16 u' with '64' in the low band. The fifth is '20 u' with '260' in the very-high band. After saving, Today's night insulin card shows '18 u at 22:30'. Saving again with the dose cleared is refused with 'Enter the dose.' and the stored night is unchanged. The page never scrolls horizontally.
+
+Falsifier: The list is not five rows or not newest first, or a dose or morning reading is wrong or attached to the wrong night, or a morning reading carries the wrong level band, or a night with no following reading shows a number or a band instead of an em dash, or saving does not update Today's night card, or a second night row is created for the same date, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/night-insulin.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/night-insulin.spec.ts`
+Verification command: `npm run test:acceptance`
