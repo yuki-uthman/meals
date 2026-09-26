@@ -1,4 +1,4 @@
-import type { DayLog, IsoDate } from '../domain/entry';
+import type { DayLog, IsoDate, Meal } from '../domain/entry';
 import type { MealRecording } from '../domain/meal-draft';
 import type { NightRecording, NightWindow } from '../domain/night';
 import type { MealInstance } from '../domain/meal-identity';
@@ -61,6 +61,22 @@ export type RecentMealsOutcome =
   | { readonly kind: 'retry'; readonly message: string }
   | { readonly kind: 'session-ended'; readonly message: string };
 
+/**
+ * What the store says when the meal asked for did not come back. Row-level
+ * security makes 'not yours' and 'not there' the same answer -- neither row is
+ * ever sent -- and the person is told the same thing either way, because the
+ * app cannot distinguish them and must not pretend to.
+ */
+export const MEAL_NOT_HERE = 'That meal is not here.';
+
+export type MealOutcome =
+  | { readonly kind: 'loaded'; readonly meal: Meal }
+  /** No such row for this account. Say so; never return quietly. */
+  | { readonly kind: 'missing'; readonly message: string }
+  /** The server could not be reached. The detail says so rather than staying put. */
+  | { readonly kind: 'retry'; readonly message: string }
+  | { readonly kind: 'session-ended'; readonly message: string };
+
 export type MealHistoryOutcome =
   | { readonly kind: 'loaded'; readonly meals: readonly MealInstance[] }
   /** The server could not be reached. The detail says so rather than claiming no history. */
@@ -69,6 +85,13 @@ export type MealHistoryOutcome =
 
 export type LogStore = {
   dayLog: (date: IsoDate) => Promise<DayLogOutcome>;
+  /**
+   * One meal with its foods, BY ITS ID. A detail is opened through this read
+   * and never by looking the meal up in whatever day log happens to be loaded:
+   * a snapshot of one date cannot answer for a meal on another, and a lookup
+   * that missed could only return quietly, which is a dead control.
+   */
+  meal: (id: string) => Promise<MealOutcome>;
   /**
    * Every meal the signed-in account has recorded, with its foods, newest first.
    * Which of them are instances of the same meal is the domain's rule and not

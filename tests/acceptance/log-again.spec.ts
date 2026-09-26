@@ -163,12 +163,22 @@ const scrollsHorizontally = (page: Page): Promise<boolean> =>
 
 const save = (page: Page): Promise<void> => page.getByRole('button', { name: /^save$/i }).click();
 
-/** Opens a meal's detail from its card body, the way value 6 established. */
+/**
+ * Opens a meal's detail from its card body, the way value 6 established, and does not
+ * return until the detail is actually on screen. Opening a detail reads the meal by its
+ * id and then its history, so the click alone leaves the day log up for a moment; a
+ * caller that read the page straight after the click would be reading the wrong page.
+ * 'Back to the day' is the control every detail carries, so it is what is waited for.
+ */
 const openDetail = async (page: Page, slot: string): Promise<void> => {
   const meal = await card(page, slot);
   const intoDetail = meal.getByRole('link').first();
   await expect(intoDetail, `the ${slot} card body opens its detail`).toHaveCount(1);
   await intoDetail.click();
+  await expect(
+    page.getByRole('button', { name: /back to the day/i }),
+    `the ${slot} detail is on screen before anything is read from it`,
+  ).toBeVisible();
 };
 
 test('a meal is logged again with only its foods copied, as a separate record that leaves the original untouched', async ({
@@ -278,7 +288,13 @@ test('a meal is logged again with only its foods copied, as a separate record th
   // detail; the context is only readable on the form that recorded it, so it is read
   // there and the form is then abandoned.
   await openDetail(phone, 'Dinner');
-  expect(await textOf(phone.locator('body')), 'the source keeps its note').toContain(SOURCE_NOTE);
+  // An auto-retrying locator assertion rather than a one-shot snapshot of the body, so
+  // this reads the source's own note and never whatever page a navigation had not yet
+  // finished leaving.
+  await expect(
+    phone.getByText(SOURCE_NOTE, { exact: false }).first(),
+    'the source keeps its note',
+  ).toBeVisible();
 
   // The repeat copied the foods exactly, so the identity rule of value 6 must pair the
   // two: two instances of one meal is what this whole product exists to compare.

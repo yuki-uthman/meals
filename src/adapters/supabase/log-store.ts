@@ -1,10 +1,12 @@
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { SESSION_ENDED, UNREACHABLE_SERVER } from '../../ports/identity';
 import {
+  MEAL_NOT_HERE,
   MEAL_NOT_SAVED,
   type DayLogOutcome,
   type LogStore,
   type MealHistoryOutcome,
+  type MealOutcome,
   type NightWindowOutcome,
   type RecentMealsOutcome,
   type SaveMealOutcome,
@@ -334,7 +336,30 @@ const toHistoryFailure = (error: PostgrestError, status: number): MealHistoryOut
     ? { kind: 'session-ended', message: SESSION_ENDED }
     : { kind: 'retry', message: UNREACHABLE_SERVER };
 
+/** And for the single-meal read, read exactly the same way. */
+const toMealFailure = (error: PostgrestError, status: number): MealOutcome =>
+  isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+
 export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
+  meal: async (id: string): Promise<MealOutcome> => {
+    try {
+      // No user_id filter here either: the select policy is the only thing that
+      // decides whether this row exists for the caller, so a guessed id comes
+      // back empty rather than being filtered out afterwards. 'Not yours' and
+      // 'not there' are therefore one answer, which is exactly what is said.
+      const result = await client.from('meals').select(MEAL_SELECT).eq('id', id).limit(1);
+      if (result.error !== null) return toMealFailure(result.error, result.status);
+      const rows = (result.data ?? []) as MealRow[];
+      const row = rows[0];
+      if (row === undefined) return { kind: 'missing', message: MEAL_NOT_HERE };
+      return { kind: 'loaded', meal: toMeal(row) };
+    } catch {
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
   mealHistory: async (): Promise<MealHistoryOutcome> => {
     try {
       // No user_id filter here either: row-level security is the only thing that

@@ -55,7 +55,7 @@ import {
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { FOOD_FORM_TITLE, foodForm } from './ui/food-form';
-import { mealDetailScreen } from './ui/meal-detail';
+import { mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { shell, type ShellHandlers } from './ui/shell';
@@ -95,6 +95,12 @@ const start = (): void => {
   let detailMeal: Meal | null = null;
   let detailInstances: readonly InstanceRow[] = [];
   let detailMessage: string | null = null;
+  /**
+   * Why the detail could not be shown at all, when the meal itself did not come
+   * back. Distinct from detailMessage, which is a history that failed beside a
+   * meal that is on screen.
+   */
+  let detailRefusal: string | null = null;
   let mealDraft: MealDraft | null = null;
   let foodDraft: FoodDraft | null = null;
   let nightDraft: NightDraft | null = null;
@@ -133,6 +139,13 @@ const start = (): void => {
         onOpenNight: () => void openNight(),
         onOpenMeal: (id) => void openMealDetail(id),
       }),
+    );
+
+  const missingScreen = (message: string): HTMLElement =>
+    shell(
+      { date, isToday: date === localToday() },
+      dayHandlers,
+      mealMissingScreen(message, { onBack: () => backToDay() }),
     );
 
   const detailScreen = (meal: Meal): HTMLElement =>
@@ -238,6 +251,7 @@ const start = (): void => {
     if (screen === 'night' && nightDraft !== null && nightHistory !== null) {
       return nightScreen(nightDraft, nightHistory);
     }
+    if (screen === 'detail' && detailRefusal !== null) return missingScreen(detailRefusal);
     if (screen === 'detail' && detailMeal !== null) return detailScreen(detailMeal);
     if (screen === 'food' && foodDraft !== null) return foodScreen(foodDraft);
     if (screen === 'meal' && mealDraft !== null) return mealScreen(mealDraft);
@@ -396,6 +410,7 @@ const start = (): void => {
     detailMeal = null;
     detailInstances = [];
     detailMessage = null;
+    detailRefusal = null;
   };
 
   /**
@@ -406,19 +421,37 @@ const start = (): void => {
    * once.
    */
   const openMealDetail = async (id: string): Promise<void> => {
-    if (dayLogState.kind !== 'loaded') return;
-    const meal = dayLogState.log.meals.find((candidate) => candidate.id === id);
-    if (meal === undefined) return;
+    // The meal is read BY ITS ID, never looked up in whatever day log happens
+    // to be loaded: a snapshot of one date cannot answer for a meal on another,
+    // and a lookup that missed could only return quietly.
+    const found = await logStore.meal(id);
+    if (found.kind === 'session-ended') {
+      await endSession(found.message);
+      return;
+    }
 
-    const opening = date;
+    clearDetail();
+    mealDraft = null;
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    screen = 'detail';
+
+    // Either the detail, or why not. Never nothing.
+    if (found.kind !== 'loaded') {
+      detailRefusal = found.message;
+      render();
+      return;
+    }
+
+    const meal = found.meal;
     const outcome = await logStore.mealHistory();
     if (outcome.kind === 'session-ended') {
       await endSession(outcome.message);
       return;
     }
-    // A step to another day while the read was in flight wins, exactly as it
-    // does everywhere else a screen is opened after a read.
-    if (opening !== date) return;
 
     detailMeal = meal;
     detailInstances =

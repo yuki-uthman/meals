@@ -190,6 +190,28 @@ const instancesRegion = (view: MealDetailView): HTMLElement => {
   return section;
 };
 
+/**
+ * A meal that could not be opened, said out loud with the same way back the
+ * detail has. Opening a meal must never silently do nothing: a guard that
+ * returns quietly is a dead control, and worse than an error, because the
+ * person cannot tell it from a missed tap.
+ */
+export const mealMissingScreen = (message: string, handlers: MealDetailHandlers): HTMLElement => {
+  const screen = element('div', 'detail-screen');
+
+  const back = document.createElement('button');
+  back.className = 'button button--quiet';
+  back.type = 'button';
+  back.textContent = BACK_LABEL;
+  back.addEventListener('click', () => handlers.onBack());
+
+  const notice = element('p', 'notice', message);
+  notice.setAttribute('role', 'alert');
+
+  screen.append(back, notice);
+  return screen;
+};
+
 export const mealDetailScreen = (
   view: MealDetailView,
   handlers: MealDetailHandlers,
