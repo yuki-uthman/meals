@@ -135,12 +135,17 @@ const serveStatic = async (root: string): Promise<{ origin: string; server: Serv
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
+  // Unreferenced so an open static server never keeps the worker process alive
+  // after the last spec: the bundle is served for the whole run and nothing has
+  // to close it at a spec boundary.
+  server.unref();
   const { port } = server.address() as AddressInfo;
   return { origin: `http://127.0.0.1:${port}`, server };
 };
 
-/** Starts the stack, resets the database onto the repository migrations, builds and serves. */
-export const startLocalStack = async (): Promise<LocalStack> => {
+let sharedStack: Promise<LocalStack> | null = null;
+
+const bringUp = async (): Promise<LocalStack> => {
   run('supabase', ['start']);
   run('supabase', ['db', 'reset', '--no-seed']);
   const status = readStatus();
@@ -158,9 +163,21 @@ export const startLocalStack = async (): Promise<LocalStack> => {
     anonKey: status.ANON_KEY,
     serviceRoleKey: status.SERVICE_ROLE_KEY,
     siteUrl: origin,
-    stop: async () => {
-      server.close();
-      await once(server, 'close');
-    },
+    // The stack outlives every individual spec, so stopping is deliberately a
+    // no-op: the served bundle and the containers are torn down when the run
+    // ends, not when one spec finishes.
+    stop: async () => {},
   };
+};
+
+/**
+ * Starts the stack, resets the database onto the repository migrations, builds and
+ * serves -- once per run, not once per spec. A reset restarts containers and costs
+ * about ninety seconds, and the suite is a verification vector that grows with every
+ * value, so the first caller pays for it and every later caller shares it. Specs
+ * isolate themselves by owning their own accounts and rows, never by resetting.
+ */
+export const startLocalStack = (): Promise<LocalStack> => {
+  sharedStack ??= bringUp();
+  return sharedStack;
 };
