@@ -530,7 +530,7 @@ test('a food never eaten has no summary and says so', async ({ browser }) => {
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
 
-test('the three tabs are present and only By food works', async ({ browser }) => {
+test('the screen carries the three tabs and looks up By food', async ({ browser }) => {
   const phone = await openLookup(browser, accounts.owner);
 
   const tab = async (name: RegExp): Promise<Locator> => {
@@ -541,20 +541,24 @@ test('the three tabs are present and only By food works', async ({ browser }) =>
   const selected = async (control: Locator): Promise<string | null> =>
     (await control.getAttribute('aria-selected')) ?? (await control.getAttribute('aria-pressed'));
 
-  const byFood = await tab(/^by food$/i);
-  await expect(byFood, 'By food is on screen').toBeVisible();
-  expect(await selected(byFood), 'By food is the tab this value works in').toBe('true');
-
-  // By change and By start arrive in values 11 and 12. They are present but NOT yet
-  // selectable, rather than pretending to work.
-  for (const name of [/^by change$/i, /^by start$/i]) {
-    const other = await tab(name);
-    await expect(other, `${name} is present`).toBeVisible();
-    const unavailable =
-      (await other.getAttribute('aria-disabled')) === 'true' || (await other.isDisabled());
-    expect(unavailable, `${name} is not yet selectable`).toBe(true);
-    expect(await selected(other), `${name} is not the selected tab`).not.toBe('true');
+  // All three tabs are on screen, because the canvas makes them one screen and a person
+  // moves between them.
+  for (const name of [/^by food$/i, /^by change$/i, /^by start$/i]) {
+    await expect(await tab(name), `${name} is on screen`).toBeVisible();
   }
+
+  // By food is the tab this value implements, and the one the screen looks up in: its own
+  // field, summary and results are what the earlier tests assert.
+  const byFood = await tab(/^by food$/i);
+  expect(await selected(byFood), 'By food is the tab this value works in').toBe('true');
+  await expect(searchField(phone), 'By food carries the search field').toBeAttached();
+  await typeQuery(phone, 'rice');
+  await expect(await resultRows(phone), 'By food is the tab that looks up a food').toHaveCount(4);
+
+  // Whether 'By change' and 'By start' are SELECTABLE is deliberately not asserted, in
+  // either direction. Values 11 and 12 make them selectable one at a time, so pinning that
+  // property here would make this oracle fail for a reason that has nothing to do with
+  // looking up a food. What is fixed is that the three tabs exist and that By food works.
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
