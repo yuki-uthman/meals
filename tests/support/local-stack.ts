@@ -57,6 +57,51 @@ const readStatus = (): SupabaseStatus => {
   return { API_URL, ANON_KEY, SERVICE_ROLE_KEY };
 };
 
+/**
+ * `supabase db reset` restarts the containers, so `supabase status` can report the URL and
+ * keys while gotrue and postgrest are still coming back up. Returning then makes the second
+ * spec of a whole-suite run fail with 'fetch failed', which reads as a product defect and is
+ * not one. So wait until both endpoints actually answer, with a bounded deadline.
+ *
+ * "Answers" means any HTTP response: a 401 from PostgREST is the service replying, which is
+ * all that is being waited for. Only a transport failure counts as not yet up.
+ */
+const READINESS_DEADLINE_MS = 120_000;
+const READINESS_POLL_MS = 250;
+
+const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
+const answers = async (url: string, apiKey: string): Promise<boolean> => {
+  try {
+    await fetch(url, { headers: { apikey: apiKey, authorization: `Bearer ${apiKey}` } });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const awaitLocalStackReady = async (status: SupabaseStatus): Promise<void> => {
+  const endpoints = [
+    `${status.API_URL}/auth/v1/health`,
+    `${status.API_URL}/rest/v1/`,
+  ] as const;
+  const deadline = Date.now() + READINESS_DEADLINE_MS;
+
+  for (const endpoint of endpoints) {
+    for (;;) {
+      if (await answers(endpoint, status.SERVICE_ROLE_KEY)) {
+        break;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `the local stack did not answer ${endpoint} within ${READINESS_DEADLINE_MS} ms`,
+        );
+      }
+      await sleep(READINESS_POLL_MS);
+    }
+  }
+};
+
 const contentTypes: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -99,6 +144,7 @@ export const startLocalStack = async (): Promise<LocalStack> => {
   run('supabase', ['start']);
   run('supabase', ['db', 'reset', '--no-seed']);
   const status = readStatus();
+  await awaitLocalStackReady(status);
 
   runWithEnv('npm', ['run', 'build'], {
     VITE_SUPABASE_URL: status.API_URL,
