@@ -663,3 +663,90 @@ Oracle target locator: `tests/acceptance/log-again.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/log-again.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 8: the expected-after estimate
+
+### Purpose
+While an entry is being filled in, report what the same foods at the same slot and the same dose did last time, as an expected after reading, and say plainly why there is no estimate when there is nothing matching to report.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read; an estimate may never be based on another account's meal.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- Expected after = the before reading plus the change of the most recent entry with the same foods, the same meal slot and the same dose; if no such entry exists, no estimate is shown.
+- The app never recommends a dose. The estimate reports what one recorded occasion did at a dose the person has already chosen, and never proposes a dose.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/expected-after.ts` | CREATE_NEW | The estimate and the reason there is none, as one pure function over the account's own meals, because this is the rule the brief states most precisely. |
+| `src/ui/meal-form.ts` | EXTEND | The Expected after panel, live beside the before reading, the slot and the dose. |
+| `src/ui/theme.css` | EXTEND | The estimate panel in both palettes, with the number taking its change band. |
+| `src/main.ts` | EXTEND | Supply the form with the account's meal history and recompute the estimate as the draft changes. |
+| `tests/acceptance/expected-after.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- The estimate is the before reading plus the change of ONE matching entry: the most recent entry with the same foods by value 6's identity rule, the same slot, and the same dose. Most recent means by date then clock time. The meal being edited is never its own basis.
+- A matching entry must have BOTH readings. An entry with no after reading has no change, so it cannot be the basis and is skipped as though it did not match, because inventing a change of zero would report something that never happened.
+- Doses are compared as numbers, so 6 and 6.00 are the same dose. A dose is part of the match, not a tolerance: 6 u and 7 u are different doses and the brief says so.
+- Four reasons for no estimate, each said plainly rather than left blank. No before reading: 'Type your reading before eating to see an estimate.' A before reading but no dose: 'Enter the dose to see an estimate.' No entry at all with these foods in this slot: 'No dinner on record with these foods.' Entries in this slot with these foods but none at this dose: 'No dinner at 7 u. Most recent was 6 u (+32).', naming the most recent one at any dose so the person can see what is on record.
+- The estimate names its source: the dose, the two readings, the signed change and the date of the entry it came from. An estimate that cannot be traced to one recorded occasion would read as a prediction the app had made up.
+- The estimated number carries the change band of the change it is built from, published as data-change-band exactly as everywhere else, so the same arithmetic is never coloured two ways.
+- The panel is live: changing the before reading, the slot or the dose recomputes it immediately, and changing slot or dose to one with no match replaces the number with the reason.
+- The panel appears on ANY meal entry that has foods, not only on one reached through 'Log again'. The rule does not depend on how the foods got into the draft, and a person who typed the same foods by hand deserves the same report. The observation names the repeat flow, which the oracle exercises.
+- The panel is labelled 'Expected after' and is never labelled as a suggestion, a target or a recommendation. It sits beside the after reading field and never fills it in: the person records what they measured, not what was expected.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| sameFoodsKey | `src/domain/meal-identity.ts:1` | REUSE | 'The same foods' here must mean exactly what it means on the detail screen, or two screens would disagree about which meals are the same. |
+| changeBand | `src/domain/band.ts:1` | REUSE | The estimate's colour is the band of its own change, by the one rule. |
+| mealHistory | `src/ports/log-store.ts:78` | REUSE | The account's meals with their foods are already read through this operation for the instance list; the estimate needs the same data and must not add a second read. |
+| doseText | `src/domain/entry.ts:64` | REUSE | '6 u' reads the same in the reason text as everywhere else. |
+| slotLabel | `src/domain/entry.ts:47` | REUSE | The reason text names the slot the way every screen names it. |
+| mealForm | `src/ui/meal-form.ts:1` | EXTEND | One recording screen gains a panel; a separate screen for the estimate would divorce it from the fields it depends on. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/log-again.spec.ts`
+
+Move: Before the panel exists, give the meal form one place where a draft change is observed, so the estimate recomputes from the draft rather than from three separate field handlers.
+
+Preserved observation: Logging again still copies only the foods and amounts, still starts the readings, dose, note and context fresh, and still saves as a separate record leaving the source untouched.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The meal form's fields and labels | producer | `src/ui/meal-form.ts:1` | UNCHANGED_COMPATIBLE | No field changes name, value or behaviour. A read-only panel is added; in particular the after reading field is never written to. |
+| The meal identity rule | consumer | `src/domain/meal-identity.ts:1` | UNCHANGED_COMPATIBLE | The estimate consumes the same key the detail screen produces, unchanged. |
+
+### Boundaries
+- Driving port: A person about to eat something they have eaten before: enter the reading and the dose they are taking, and see what the same foods at the same slot and the same dose did last time.
+- Driven port: The log-store port's meal history, already used by the instance list.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The estimate is one pure function of a draft and a list of meals, in src/domain, with no DOM and no SDK. The panel is a pure function of its result.
+- Failure: Condition: The meal history cannot be read because the server is unreachable. | Outcome: Retry | Observation: The panel shows 'Cannot reach the server. Try again.' with a usable retry control, and no number. Every field stays usable, because an estimate is a convenience and must never block recording what happened.
+- Failure: Condition: The most recent matching entry has no after reading. | Outcome: Refusal | Observation: That entry is skipped and the next matching one is used; if none has both readings the panel gives the no-entry reason rather than a number, because a change that was never measured cannot be reported.
+- Failure: Condition: The before reading is cleared after an estimate was shown. | Outcome: Refusal | Observation: The number disappears and the panel returns to 'Type your reading before eating to see an estimate.', because an estimate without a starting point is meaningless.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: While logging again, as soon as the before reading is typed the entry shows an expected after reading equal to before plus the change of the most recent entry with the same foods, the same slot and the same dose; changing slot or dose to one with no such entry removes the estimate and says why.
+
+Stimulus: Account A owns, all with the foods Chicken rice of type Mixed dish 250 g and Cucumber salad of type Vegetable 80 g: a dinner seven days ago with 6 units, 110 to 142; a dinner fourteen days ago with 6 units, 120 to 150; a dinner ten days ago with 8 units, 145 to 121; a dinner three days ago with 6 units and a before reading of 130 and NO after reading; and a lunch five days ago with 6 units, 100 to 150. A browser at a 360 px viewport signs in, opens the seven-day-old dinner and uses 'Log again with these foods'. It reads the panel before typing anything, then enters glucose before 150 and reads it, then enters the dose 6, then changes the dose to 8, then to 7, then changes the slot to Breakfast, then clears the before reading.
+
+Expected: Before anything is typed the panel reads 'Type your reading before eating to see an estimate.' With 150 entered and no dose it reads 'Enter the dose to see an estimate.' At 6 units it shows 182 in the rose change band and names its source as 6 u, 110 to 142, +32, on the date seven days ago -- not the fourteen-day-old dinner, which is older, nor the three-day-old one, which has no after reading, nor the lunch, which is another slot. At 8 units it shows 126 in the stable band and names 8 u, 145 to 121, −24. At 7 units there is no number and it reads 'No dinner at 7 u. Most recent was 6 u (+32).' With the slot changed to Breakfast there is no number and it reads 'No breakfast on record with these foods.' With the before reading cleared it returns to 'Type your reading before eating to see an estimate.' The after reading field is empty throughout. The page never scrolls horizontally.
+
+Falsifier: The estimate is not the before reading plus the matching change, or it is based on an older entry when a newer one matches, or on an entry with no after reading, or on another slot, or on another dose, or the panel shows a number when nothing matches, or a reason is missing or does not name why, or the estimated number carries the wrong change band, or the estimate is written into the after reading field, or the panel does not update when the slot or dose changes, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/expected-after.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/expected-after.spec.ts`
+Verification command: `npm run test:acceptance`
