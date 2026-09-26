@@ -5,7 +5,7 @@
 import { createSupabaseClient } from './adapters/supabase/client';
 import { supabaseIdentity } from './adapters/supabase/identity';
 import { supabaseLogStore } from './adapters/supabase/log-store';
-import { localToday, type IsoDate } from './domain/entry';
+import { localToday, shiftDate, type IsoDate } from './domain/entry';
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { shell } from './ui/shell';
@@ -22,7 +22,12 @@ const start = (): void => {
   const client = createSupabaseClient();
   const identity = supabaseIdentity(client);
   const logStore = supabaseLogStore(client);
-  const date: IsoDate = localToday();
+  /**
+   * The date being read lives here, not in a screen, because moving it is a
+   * fresh read through the log-store port rather than a redraw of rows already
+   * in hand. Nothing caches another day's entries.
+   */
+  let date: IsoDate = localToday();
 
   let account: Account | null = null;
   let signInState: SignInState = emptySignInState;
@@ -35,8 +40,12 @@ const start = (): void => {
       account === null
         ? signInScreen(signInState, { onSubmit: (credentials) => void submit(credentials) })
         : shell(
-            { date },
-            { onSignOut: () => void signOut() },
+            { date, isToday: date === localToday() },
+            {
+              onSignOut: () => void signOut(),
+              onPreviousDay: () => moveDay(-1),
+              onNextDay: () => moveDay(1),
+            },
             dayLogSection(dayLogState, { onRetry: () => void loadDayLog() }),
           ),
     );
@@ -71,6 +80,17 @@ const start = (): void => {
   };
 
   /**
+   * Stepping the day re-reads through the same port. The log has no future, so a
+   * step past today is refused here as well as being disabled on screen.
+   */
+  const moveDay = (days: number): void => {
+    const next = shiftDate(date, days);
+    if (next > localToday()) return;
+    date = next;
+    void loadDayLog();
+  };
+
+  /**
    * Called both by a fresh sign-in and by the client's own auth state change
    * event. A token refresh reports the same account, and must not throw away the
    * day log already on screen, so only a real change of account re-renders.
@@ -83,6 +103,9 @@ const start = (): void => {
       render();
       return;
     }
+    // A session that has just changed hands opens on its own today, never on a
+    // date the previous reader had stepped to.
+    date = localToday();
     void loadDayLog();
   };
 

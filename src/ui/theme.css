@@ -20,6 +20,18 @@
   --accent: #2f6f4f;
   --accent-ink: #ffffff;
   --danger: #a3302a;
+
+  /* Band colours from the canvas. They are deliberately the same in both
+     palettes, so the two themes read identically: a band is a statement about
+     what happened, and it must not change its mind in the dark. */
+  --band-dropped: #2f5fa8;
+  --band-stable: #2e7d4f;
+  --band-rose: #b45309;
+  --band-rose-high: #7c3a0b;
+  --band-low: #b42318;
+  --band-in-range: #2e7d4f;
+  --band-high: #b45309;
+  --band-very-high: #7c3a0b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -32,6 +44,8 @@
     --accent: #6fbf95;
     --accent-ink: #10231a;
     --danger: #f0938d;
+    /* No band token is overridden here, on purpose: the canvas keeps the band
+       colours unchanged between light and dark so the two themes read the same. */
   }
 }
 
@@ -166,31 +180,154 @@ label {
   padding-bottom: var(--space-2);
 }
 
-.shell__title {
-  font-size: 1.125rem;
+.shell__day {
+  min-width: 0;
+}
+
+/* The date sits above the heading, quietly: the heading says which day this is
+   in the reader's terms ('Today'), the line above says which date that was. */
+.shell__weekday {
   margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.shell__title {
+  font-size: 1.375rem;
+  margin: 0;
+}
+
+.shell__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.button--step {
+  width: auto;
+  min-width: 2.5rem;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  padding: var(--space-2) var(--space-3);
+  font-size: 1rem;
 }
 
 /* ------------------------------------------------------------- day log */
 
-.day-log__lines {
+.day-log__cards {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
-.day-log__line {
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--space-3);
+  min-width: 0;
 }
 
-/* The slot label is screen furniture, so it reads quieter than the data beside it. */
-.day-log__slot {
+.card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* The slot label is screen furniture, so it reads quieter than the data beside it.
+   Deliberately not text-transformed: the label is read as the words the domain
+   produced, and a CSS transform would make the rendered text differ from them. */
+.card__slot {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.card__time,
+.card__foods,
+.card__dose,
+.card__readings {
+  margin: 0;
+}
+
+.card__time {
+  font-variant-numeric: tabular-nums;
+}
+
+.card__dose {
+  color: var(--ink-muted);
+}
+
+.card__readings {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.card__arrow {
+  color: var(--ink-muted);
+}
+
+/* The change is the judgement the card exists to make, so it is the only thing
+   on the card that carries a band colour. The colour is bound to the published
+   band name, never written into the markup. */
+.card__change {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+[data-change-band='dropped'] {
+  color: var(--band-dropped);
+}
+
+[data-change-band='stable'] {
+  color: var(--band-stable);
+}
+
+[data-change-band='rose'] {
+  color: var(--band-rose);
+}
+
+[data-change-band='rose-high'] {
+  color: var(--band-rose-high);
+}
+
+[data-level-band='low'] {
+  color: var(--band-low);
+}
+
+[data-level-band='in-range'] {
+  color: var(--band-in-range);
+}
+
+[data-level-band='high'] {
+  color: var(--band-high);
+}
+
+[data-level-band='very-high'] {
+  color: var(--band-very-high);
+}
+
+/* An empty slot is a statement about the day, not the account's data, so it
+   reads as furniture. */
+.card__placeholder {
+  margin: 0;
   color: var(--ink-muted);
 }
 

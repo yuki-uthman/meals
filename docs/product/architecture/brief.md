@@ -152,6 +152,7 @@ functional
 - Cards are read-only in this value. Nothing on the Today screen opens a meal or records one; value 3 records and value 6 opens.
 - Value 1's data-entry rule carries forward unchanged: a meal card's time, foods, dose and readings each carry data-entry, and the night insulin dose line carries it. A slot label, a heading, the date and a 'Not logged yet' placeholder never do, because they are the same for every account.
 - 'No entries yet.' is retired by this value. A date with nothing on it shows the three fixed slot cards reading 'Not logged yet' and a night insulin card reading 'Not logged yet', which is what the observation asks for and is also the surface value 3 logs from.
+- startLocalStack must not return until the local stack actually answers. `supabase db reset` restarts containers, so the support polls the auth health endpoint and the REST endpoint until both respond, with a bounded deadline, before any seeding runs. Without it the second spec of a whole-suite run fails with 'fetch failed' while gotrue is still coming back, which reads as a product defect and is not one.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |

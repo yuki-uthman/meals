@@ -2,6 +2,8 @@
 // its day-log line. No DOM and no SDK here, so the reading rule this value is
 // judged on is testable on its own.
 
+import { changeBand, type ChangeBand } from './band';
+
 /** A calendar date in the reader's own timezone, as 'YYYY-MM-DD'. */
 export type IsoDate = string;
 
@@ -64,42 +66,9 @@ export const foodText = (food: FoodPortion): string => {
 export const doseText = (units: number | null): string | null =>
   units === null ? null : `${amountText(units)} u`;
 
-/**
- * '104 → 186 mg/dL' when both readings exist, '104 mg/dL before' or
- * '186 mg/dL after' when only one does, and nothing when neither does. Whole
- * mg/dL numbers, as stored.
- */
-export const glucoseText = (meal: Meal): string | null => {
-  const before = meal.glucoseBefore;
-  const after = meal.glucoseAfter;
-  if (before !== null && after !== null) return `${amountText(before)} → ${amountText(after)} mg/dL`;
-  if (before !== null) return `${amountText(before)} mg/dL before`;
-  if (after !== null) return `${amountText(after)} mg/dL after`;
-  return null;
-};
-
-/**
- * Everything on a meal's line that the account itself recorded: the clock time,
- * the foods with their amounts, the dose and the glucose readings. The slot
- * label is deliberately absent, because it is the same for every account and so
- * belongs to the screen rather than to anybody's data.
- *
- * '07:40 · Oats 60 g, Milk 200 ml · 5 u · 104 → 186 mg/dL'. A segment with
- * nothing recorded in it is dropped rather than shown empty.
- */
-export const mealRecordedText = (meal: Meal): string => {
-  const foods = meal.foods.length === 0 ? null : meal.foods.map(foodText).join(', ');
-  const segments = [clockTime(meal.eatenAt), foods, doseText(meal.insulinUnits), glucoseText(meal)];
-  return segments.filter((segment): segment is string => segment !== null).join(' · ');
-};
-
-/**
- * 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml · 5 u · 104 → 186 mg/dL'. The
- * whole line as one string, slot label included, for readers that want the text
- * without the furniture boundary.
- */
-export const mealLine = (meal: Meal): string =>
-  `${slotLabel(meal.slot)} · ${mealRecordedText(meal)}`;
+/** The foods as the card reads them: 'Oats 60 g · Milk 200 ml'. */
+export const foodsText = (foods: readonly FoodPortion[]): string | null =>
+  foods.length === 0 ? null : foods.map(foodText).join(' · ');
 
 /** '18 u at 22:30', or '18 u' when no time was recorded. */
 export const nightInsulinLine = (night: NightInsulin): string => {
@@ -109,34 +78,117 @@ export const nightInsulinLine = (night: NightInsulin): string => {
 
 const byTime = (a: Meal, b: Meal): number => a.eatenAt.getTime() - b.eatenAt.getTime();
 
+/** The placeholder an empty fixed slot and an unrecorded night dose both read. */
+export const NOT_LOGGED_YET = 'Not logged yet';
+
+export const NIGHT_INSULIN_LABEL = 'Night insulin';
+
 /**
- * One line of the day log, split where ownership is: `furniture` is the part
- * that reads the same for every account, `recorded` is the part that exists only
- * because this account wrote it down. The reading surface marks the second as
- * entry data and the first as nothing of the kind.
+ * The three slots the screen always shows, in the order it shows them. A snack
+ * is deliberately absent: a logged snack gets its own card after dinner, but an
+ * unlogged snack is not a hole in the day the way a missed dinner is.
  */
-export type DayLogEntry = {
-  readonly furniture: string | null;
-  readonly recorded: string;
+export const FIXED_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner'];
+
+/**
+ * After minus before, or nothing at all when either reading is missing. A change
+ * that has not happened yet must not be drawn as zero.
+ */
+export const glucoseChange = (meal: Meal): number | null =>
+  meal.glucoseBefore === null || meal.glucoseAfter === null
+    ? null
+    : meal.glucoseAfter - meal.glucoseBefore;
+
+/**
+ * '+82', '−18' with the true minus sign U+2212, and '0' for no change. The sign
+ * is always explicit, because the whole point of the number is its direction.
+ */
+export const changeText = (change: number): string => {
+  if (change === 0) return '0';
+  return change > 0 ? `+${amountText(change)}` : `−${amountText(Math.abs(change))}`;
 };
 
-/** Every line the day log shows, meals in clock order then the night dose. */
-export const dayLogEntries = (log: DayLog): readonly DayLogEntry[] => [
-  ...[...log.meals]
-    .sort(byTime)
-    .map((meal): DayLogEntry => ({ furniture: slotLabel(meal.slot), recorded: mealRecordedText(meal) })),
-  ...log.nightInsulin.map(
-    (night): DayLogEntry => ({ furniture: null, recorded: nightInsulinLine(night) }),
-  ),
-];
+export type ChangeReading = {
+  readonly text: string;
+  readonly band: ChangeBand;
+};
 
-/** The same lines as plain text, furniture joined back on. */
-export const dayLogLines = (log: DayLog): readonly string[] =>
-  dayLogEntries(log).map((entry) =>
-    entry.furniture === null ? entry.recorded : `${entry.furniture} · ${entry.recorded}`,
-  );
+/**
+ * One logged meal as the card reads it. Every string here except `label` exists
+ * only because the account recorded it, which is exactly the split the reading
+ * surface marks with data-entry; `change` is derived from the readings rather
+ * than recorded, so it is published with its band and without that mark.
+ */
+export type MealCard = {
+  readonly kind: 'meal';
+  readonly id: string;
+  readonly label: string;
+  readonly time: string;
+  readonly foods: string | null;
+  readonly dose: string | null;
+  readonly before: string | null;
+  readonly after: string | null;
+  readonly change: ChangeReading | null;
+};
 
-export const isEmpty = (log: DayLog): boolean => dayLogEntries(log).length === 0;
+/** A fixed slot with nothing logged in it: the label and the placeholder. */
+export type EmptySlotCard = {
+  readonly kind: 'empty-slot';
+  readonly label: string;
+};
+
+/**
+ * The night dose, always exactly one card so the screen never reads as two
+ * separate nights. With nothing recorded `doses` is empty and the card shows the
+ * placeholder instead.
+ */
+export type NightCard = {
+  readonly kind: 'night';
+  readonly label: string;
+  readonly doses: readonly string[];
+};
+
+export type DayCard = MealCard | EmptySlotCard | NightCard;
+
+const mealCard = (meal: Meal): MealCard => {
+  const change = glucoseChange(meal);
+  return {
+    kind: 'meal',
+    id: meal.id,
+    label: slotLabel(meal.slot),
+    time: clockTime(meal.eatenAt),
+    foods: foodsText(meal.foods),
+    dose: doseText(meal.insulinUnits),
+    before: meal.glucoseBefore === null ? null : amountText(meal.glucoseBefore),
+    after: meal.glucoseAfter === null ? null : amountText(meal.glucoseAfter),
+    change: change === null ? null : { text: changeText(change), band: changeBand(change) },
+  };
+};
+
+/**
+ * The whole screen as cards: the three fixed slots in order, each either its
+ * logged meals or the placeholder, then any snacks in clock order, then the one
+ * night insulin card.
+ */
+export const dayCards = (log: DayLog): readonly DayCard[] => {
+  const inSlot = (slot: MealSlot): readonly Meal[] =>
+    log.meals.filter((meal) => meal.slot === slot).sort(byTime);
+
+  const fixed = FIXED_SLOTS.flatMap((slot): readonly DayCard[] => {
+    const meals = inSlot(slot);
+    return meals.length === 0
+      ? [{ kind: 'empty-slot', label: slotLabel(slot) }]
+      : meals.map(mealCard);
+  });
+
+  const night: NightCard = {
+    kind: 'night',
+    label: NIGHT_INSULIN_LABEL,
+    doses: log.nightInsulin.map(nightInsulinLine),
+  };
+
+  return [...fixed, ...inSlot('snack').map(mealCard), night];
+};
 
 export const emptyDayLog = (date: IsoDate): DayLog => ({ date, meals: [], nightInsulin: [] });
 
@@ -145,3 +197,13 @@ export const localToday = (now: Date = new Date()): IsoDate =>
   `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
     now.getDate(),
   ).padStart(2, '0')}`;
+
+/**
+ * The date `days` away, through the local calendar rather than through
+ * arithmetic on the string, so a month end and a daylight-saving change both
+ * land where the reader expects.
+ */
+export const shiftDate = (date: IsoDate, days: number): IsoDate => {
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  return localToday(new Date(year, month - 1, day + days));
+};
