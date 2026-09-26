@@ -1,9 +1,13 @@
 import {
   dayCards,
+  editMealLabel,
+  logSlotLabel,
   NOT_LOGGED_YET,
   type DayCard,
   type DayLog,
+  type EmptySlotCard,
   type MealCard,
+  type MealSlot,
   type NightCard,
 } from '../domain/entry';
 
@@ -19,6 +23,10 @@ export type DayLogState =
 
 export type DayLogHandlers = {
   readonly onRetry: () => void;
+  /** The empty slot card is the way to log that slot, with the slot already chosen. */
+  readonly onLogSlot: (slot: MealSlot) => void;
+  /** A logged card's Edit control, which is how the after reading arrives later. */
+  readonly onEditMeal: (id: string) => void;
 };
 
 const paragraph = (className: string, text: string): HTMLElement => {
@@ -91,9 +99,27 @@ const readings = (card: MealCard): HTMLElement | null => {
   return row;
 };
 
-const mealCardItem = (card: MealCard): HTMLElement => {
+/**
+ * The Edit control, named for its slot: 'Edit dinner'. It carries no data-entry,
+ * because 'Edit' reads the same for every account. The name and the place are
+ * fixed for the rest of the delivery: value 6 gives the card body its own
+ * behaviour, and this control keeps working exactly as it does here.
+ */
+const editControl = (card: MealCard, onEditMeal: (id: string) => void): HTMLElement => {
+  const control = document.createElement('button');
+  control.className = 'button button--edit';
+  control.type = 'button';
+  control.setAttribute('aria-label', editMealLabel(card.slot));
+  control.textContent = 'Edit';
+  control.addEventListener('click', () => onEditMeal(card.id));
+  return control;
+};
+
+const mealCardItem = (card: MealCard, handlers: DayLogHandlers): HTMLElement => {
   const item = cardItem('card--meal');
-  item.append(cardHead(card.label, recorded('p', 'card__time', card.time)));
+  const head = cardHead(card.label, recorded('p', 'card__time', card.time));
+  head.append(editControl(card, handlers.onEditMeal));
+  item.append(head);
   if (card.foods !== null) item.append(recorded('p', 'card__foods', card.foods));
   if (card.dose !== null) item.append(recorded('p', 'card__dose', card.dose));
   const row = readings(card);
@@ -112,19 +138,36 @@ const nightCardItem = (card: NightCard): HTMLElement => {
   return item;
 };
 
-const cardElement = (card: DayCard): HTMLElement => {
-  if (card.kind === 'meal') return mealCardItem(card);
-  if (card.kind === 'night') return nightCardItem(card);
-
+/**
+ * An empty fixed slot, which is now how that slot gets logged. The whole card is
+ * the control, and it holds exactly the label and the placeholder it held before:
+ * the words on the card are unchanged, so the reading this surface was judged on
+ * still reads as 'Breakfast' and 'Not logged yet' and nothing else.
+ */
+const emptySlotItem = (card: EmptySlotCard, handlers: DayLogHandlers): HTMLElement => {
   const item = cardItem('card--empty');
-  item.append(cardHead(card.label, null), placeholder());
+
+  const open = document.createElement('button');
+  open.className = 'card__log';
+  open.type = 'button';
+  open.setAttribute('aria-label', logSlotLabel(card.slot));
+  open.append(cardHead(card.label, null), placeholder());
+  open.addEventListener('click', () => handlers.onLogSlot(card.slot));
+
+  item.append(open);
   return item;
 };
 
-const cardList = (cards: readonly DayCard[]): HTMLElement => {
+const cardElement = (card: DayCard, handlers: DayLogHandlers): HTMLElement => {
+  if (card.kind === 'meal') return mealCardItem(card, handlers);
+  if (card.kind === 'night') return nightCardItem(card);
+  return emptySlotItem(card, handlers);
+};
+
+const cardList = (cards: readonly DayCard[], handlers: DayLogHandlers): HTMLElement => {
   const list = document.createElement('ul');
   list.className = 'day-log__cards';
-  for (const card of cards) list.append(cardElement(card));
+  for (const card of cards) list.append(cardElement(card, handlers));
   return list;
 };
 
@@ -159,6 +202,6 @@ export const dayLogSection = (state: DayLogState, handlers: DayLogHandlers): HTM
   // The cards are always the same shape: three fixed slots, any snacks, then the
   // night dose. A 'Not logged yet' card is furniture -- the same words for every
   // account -- so it carries nobody's data and is not marked as an entry.
-  section.append(cardList(dayCards(state.log)));
+  section.append(cardList(dayCards(state.log), handlers));
   return section;
 };

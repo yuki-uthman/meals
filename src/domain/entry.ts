@@ -9,8 +9,66 @@ export type IsoDate = string;
 
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
+/** Every slot a meal may be recorded against, in the order a chooser offers them. */
+export const MEAL_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+
+/**
+ * The brief's seven food types. The stored value is what the check constraint on
+ * meal_foods.food_type allows, so this list and the migration say the same thing.
+ */
+export type FoodType =
+  | 'carb-heavy'
+  | 'protein'
+  | 'vegetable'
+  | 'fruit'
+  | 'dairy'
+  | 'mixed dish'
+  | 'drink';
+
+export const FOOD_TYPES: readonly FoodType[] = [
+  'carb-heavy',
+  'protein',
+  'vegetable',
+  'fruit',
+  'dairy',
+  'mixed dish',
+  'drink',
+];
+
+const FOOD_TYPE_LABELS: Readonly<Record<FoodType, string>> = {
+  'carb-heavy': 'Carb-heavy',
+  protein: 'Protein',
+  vegetable: 'Vegetable',
+  fruit: 'Fruit',
+  dairy: 'Dairy',
+  'mixed dish': 'Mixed dish',
+  drink: 'Drink',
+};
+
+export const foodTypeLabel = (type: FoodType): string => FOOD_TYPE_LABELS[type];
+
+/** The brief's five amount units. Shown exactly as they are stored. */
+export type AmountUnit = 'g' | 'ml' | 'pc' | 'cup' | 'tbsp';
+
+export const AMOUNT_UNITS: readonly AmountUnit[] = ['g', 'ml', 'pc', 'cup', 'tbsp'];
+
+/** Whether the person moved around the meal, and on which side of it. */
+export type ExerciseContext = 'none' | 'before' | 'after';
+
+export const EXERCISE_CONTEXTS: readonly ExerciseContext[] = ['none', 'before', 'after'];
+
+const EXERCISE_LABELS: Readonly<Record<ExerciseContext, string>> = {
+  none: 'None',
+  before: 'Before meal',
+  after: 'After meal',
+};
+
+export const exerciseContextLabel = (context: ExerciseContext): string => EXERCISE_LABELS[context];
+
 export type FoodPortion = {
   readonly name: string;
+  /** Reading never needed the type; recording does, so the portion carries it. */
+  readonly foodType: FoodType | null;
   readonly amount: number | null;
   readonly unit: string | null;
 };
@@ -22,6 +80,8 @@ export type Meal = {
   readonly glucoseBefore: number | null;
   readonly glucoseAfter: number | null;
   readonly insulinUnits: number | null;
+  readonly exerciseContext: ExerciseContext;
+  readonly note: string | null;
   readonly foods: readonly FoodPortion[];
 };
 
@@ -47,6 +107,16 @@ const SLOT_LABELS: Readonly<Record<MealSlot, string>> = {
 };
 
 export const slotLabel = (slot: MealSlot): string => SLOT_LABELS[slot];
+
+/**
+ * The accessible names of the two controls a card carries: 'Log dinner' on an
+ * empty slot and 'Edit dinner' on a logged meal. They name the slot in words
+ * rather than by position, so a person using a screen reader hears which meal a
+ * control belongs to, and the Edit name is fixed for the rest of the delivery.
+ */
+export const logSlotLabel = (slot: MealSlot): string => `Log ${slot}`;
+
+export const editMealLabel = (slot: MealSlot): string => `Edit ${slot}`;
 
 /** The reader's local clock time as 'HH:MM'. */
 export const clockTime = (at: Date): string =>
@@ -122,6 +192,8 @@ export type ChangeReading = {
 export type MealCard = {
   readonly kind: 'meal';
   readonly id: string;
+  /** The slot itself, beside its label, so a control can name the meal it edits. */
+  readonly slot: MealSlot;
   readonly label: string;
   readonly time: string;
   readonly foods: string | null;
@@ -134,6 +206,8 @@ export type MealCard = {
 /** A fixed slot with nothing logged in it: the label and the placeholder. */
 export type EmptySlotCard = {
   readonly kind: 'empty-slot';
+  /** The slot this card is the way to log, so the card can open New meal on it. */
+  readonly slot: MealSlot;
   readonly label: string;
 };
 
@@ -155,6 +229,7 @@ const mealCard = (meal: Meal): MealCard => {
   return {
     kind: 'meal',
     id: meal.id,
+    slot: meal.slot,
     label: slotLabel(meal.slot),
     time: clockTime(meal.eatenAt),
     foods: foodsText(meal.foods),
@@ -177,7 +252,7 @@ export const dayCards = (log: DayLog): readonly DayCard[] => {
   const fixed = FIXED_SLOTS.flatMap((slot): readonly DayCard[] => {
     const meals = inSlot(slot);
     return meals.length === 0
-      ? [{ kind: 'empty-slot', label: slotLabel(slot) }]
+      ? [{ kind: 'empty-slot', slot, label: slotLabel(slot) }]
       : meals.map(mealCard);
   });
 
