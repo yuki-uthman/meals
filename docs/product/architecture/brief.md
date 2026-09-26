@@ -56,6 +56,7 @@ functional
 - The Supabase client's own persisted session is the session. The app renders the sign-in screen when there is none and the shell when there is, and re-renders on the auth state change event.
 - Acceptance runs against the Supabase CLI local stack in Docker with two seeded accounts, so the oracle exercises real Postgres and real row-level security rather than a stub.
 - The oracle drives the built bundle served as static files, because a live GitHub Pages URL is not a locally falsifiable observation; the Pages workflow publishes that same bundle.
+- The oracle and its test supports are the only bytes the acceptance step writes. supabase/migrations/0001_owner_scoped_schema.sql is production scope and is written at craft time, so the oracle is red until the schema and its policies exist.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -81,7 +82,6 @@ Not applicable: No contract exists yet between separately released parts. This v
 - Failure: Condition: A write is sent and the response is lost before it arrives, so the browser cannot tell whether Postgres committed it. | Outcome: Indeterminate | Observation: The screen says 'Could not confirm the save. Check the entry before saving again.' and does not silently retry, because a duplicated meal would corrupt the comparison this product exists for.
 
 ### Acceptance supports
-- `supabase/migrations/0001_owner_scoped_schema.sql`
 - `tests/support/local-stack.ts`
 - `tests/support/accounts.ts`
 
