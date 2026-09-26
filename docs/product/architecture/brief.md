@@ -929,3 +929,87 @@ Oracle target locator: `tests/acceptance/lookup-by-food.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/lookup-by-food.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 11: lookup by change
+
+### Purpose
+Answer 'which past meals moved me about this much?': enter the change wanted and a window, and see the meals whose change came nearest, nearest first, each with its dose, its two readings and how far off it was.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read; a lookup may never reach another account's meals.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- Lookups return past meals nearest to the target first; each result shows how far off it was and links to that meal.
+- The app never recommends a dose. A nearest-match list reports what happened at doses already taken and proposes nothing.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/nearest-lookup.ts` | CREATE_NEW | Nearest-first matching within a window, shared by this value and value 12, because the ordering and the distance are one rule over two different quantities. |
+| `src/ui/lookup.ts` | EXTEND | The 'By change' tab becomes selectable and carries the target field, the window chips and the results. |
+| `src/ui/theme.css` | EXTEND | Window chips and the distance label, in both palettes. |
+| `src/main.ts` | EXTEND | Hold the chosen tab, the target and the window, and open a result's meal. |
+| `tests/acceptance/lookup-by-change.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- The target is a signed change the person types, so -20 and +40 are both askable. The field is labelled 'Change wanted' and takes a minus sign.
+- The window is one of three chips, plus or minus 2, 5 and 10, defaulting to plus or minus 5. A window is a TOLERANCE, not a ranking: a meal outside it is not listed at all, however close the next nearest is, because the person chose how much slack they would accept.
+- Only meals with BOTH readings can be listed, because a change needs both. A meal with no after reading has no change and is absent rather than shown with an empty distance.
+- Results are ordered by distance from the target, nearest first, where distance is the absolute difference between the meal's change and the target. Equal distances are broken by date, newer first, so the order is total and the oracle can assert positions.
+- Each result shows how far off it was in words: 'exact' when the change equals the target, otherwise '3 off'. A signed distance would invite reading it as another change.
+- Each result shows the date and slot, the dose, the meal's foods with amounts, and the two readings with the banded change, the same card a food lookup result uses. One result card, three lookups: a person should not have to relearn the row.
+- With no target entered the screen invites one rather than listing everything. With a target and a window that match nothing the results area says 'No meals within that window.', naming the window rather than the target, because widening the window is the move that finds something.
+- Each result opens that meal's detail, by id through the port, as every other list does.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| mealHistory | `src/ports/log-store.ts:78` | REUSE | The account's meals are already read this way for the instance list, the estimate and the food lookup. |
+| lookupResultCard | `src/ui/lookup.ts:1` | REUSE | The result card value 10 built is the card this value lists; a second card shape would make two lookups read differently for no reason. |
+| changeBand | `src/domain/band.ts:1` | REUSE | A result's change is banded by the one rule. |
+| openMealDetail | `src/main.ts:408` | REUSE | A result opens a meal exactly as a card, a cell or a food result does. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/lookup-by-food.spec.ts`
+
+Move: Before this tab exists, lift value 10's result card and its tab strip out of the food lookup into parts the three lookups share, so 'By change' adds a query and a projection rather than a second screen.
+
+Preserved observation: Typing a food still summarises the matching meals with the typical amount, the typical dose and the average change, still lists them newest first, and each still opens its meal.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The Lookup screen's tab strip and result card | producer | `src/ui/lookup.ts:1` | UNCHANGED_COMPATIBLE | The By food tab keeps its field, its summary and its results unchanged. The By change tab stops being inert and becomes selectable, which value 10's design said would happen here. |
+| The lookup-by-food oracle as a consumer of that screen | consumer | `tests/acceptance/lookup-by-food.spec.ts:379` | UNCHANGED_COMPATIBLE | It selects the By food tab and reads its own results; a sibling tab becoming usable does not change what it asserts. |
+
+### Boundaries
+- Driving port: A person who knows the move they want: enter the change, pick how much slack, and see which meals did about that, nearest first.
+- Driven port: The log-store port's meal history.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The distance, the window and the ordering are pure functions in src/domain over meals already read. The screen is a pure function of the result.
+- Failure: Condition: The meal history cannot be read because the server is unreachable. | Outcome: Retry | Observation: The screen shows 'Cannot reach the server. Try again.' with a usable retry control and no results, rather than an empty list that would read as nothing ever matching.
+- Failure: Condition: No meal's change falls within the window. | Outcome: Refusal | Observation: The results area says 'No meals within that window.' and the window chips stay usable, so widening is one tap away.
+- Failure: Condition: A meal's change equals the target exactly. | Outcome: Refusal | Observation: It is listed first and its distance reads 'exact' rather than '0 off', because zero distance is a different statement from a distance of zero units.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: Lookup by change: entering a target change and a window (±2, ±5, ±10) lists past meals whose change was nearest, nearest first, each showing dose, before → after and how far off it was.
+
+Stimulus: Account A owns six meals, all with a food named Rice and each on its own day within the last two weeks. Their readings are: 120 to 140 (+20), 130 to 152 (+22), 100 to 117 (+17), 140 to 172 (+32), 150 to 120 (-30), and one with a before reading of 110 and NO after reading. A browser at a 360 px viewport signs in, opens Lookup, selects the 'By change' tab, enters +20 as the change wanted, and reads the results at the default window, then at plus or minus 2, then at plus or minus 10, then enters -400.
+
+Expected: At plus or minus 5 three meals are listed, nearest first: the +20 meal reading 'exact', then the +22 meal reading '2 off', then the +17 meal reading '3 off'. The +32 and -30 meals are outside the window and absent, and the meal with no after reading is absent in every window. At plus or minus 2 only the +20 and +22 meals remain, in that order. At plus or minus 10 the +32 meal joins them last, reading '12 off'. Every result shows its dose, its two readings and its change with the change band the rule gives. With -400 entered the results area reads 'No meals within that window.' Opening the first result shows that meal's detail. The page never scrolls horizontally.
+
+Falsifier: A meal outside the window is listed, or one inside it is missing, or the order is not nearest first, or a tie is not broken by date, or a distance is wrong or signed or reads '0 off' for an exact match, or a meal with no after reading appears, or a result omits its dose or its readings or its change band, or a result does not open its meal, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/lookup-by-change.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/lookup-by-change.spec.ts`
+Verification command: `npm run test:acceptance`
