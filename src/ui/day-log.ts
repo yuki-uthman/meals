@@ -10,6 +10,7 @@ import {
   type MealSlot,
   type NightCard,
 } from '../domain/entry';
+import { OPEN_NIGHT_LABEL } from '../domain/night';
 
 // The reading surface: the signed-in account's own entries for one date, as the
 // Today screen's cards. 'No entries yet.' is retired -- a date with nothing on it
@@ -27,6 +28,8 @@ export type DayLogHandlers = {
   readonly onLogSlot: (slot: MealSlot) => void;
   /** A logged card's Edit control, which is how the after reading arrives later. */
   readonly onEditMeal: (id: string) => void;
+  /** The night card is the way in to the night screen, recorded or not. */
+  readonly onOpenNight: () => void;
 };
 
 const paragraph = (className: string, text: string): HTMLElement => {
@@ -127,14 +130,29 @@ const mealCardItem = (card: MealCard, handlers: DayLogHandlers): HTMLElement => 
   return item;
 };
 
-const nightCardItem = (card: NightCard): HTMLElement => {
+/**
+ * The night dose card, which is now the way in to the night screen. The whole
+ * card is the control, exactly as an empty slot card is, and the words on it are
+ * unchanged: it still reads as 'Night insulin' and either the recorded doses or
+ * 'Not logged yet'. Opening the screen is how a night is recorded and also how a
+ * recorded one is corrected, because there is one night per date either way.
+ */
+const nightCardItem = (card: NightCard, handlers: DayLogHandlers): HTMLElement => {
   const item = cardItem('card--night');
-  item.append(cardHead(card.label, null));
+
+  const open = document.createElement('button');
+  open.className = 'card__log';
+  open.type = 'button';
+  open.setAttribute('aria-label', OPEN_NIGHT_LABEL);
+  open.append(cardHead(card.label, null));
   if (card.doses.length === 0) {
-    item.append(placeholder());
-    return item;
+    open.append(placeholder());
+  } else {
+    for (const dose of card.doses) open.append(recorded('p', 'card__dose', dose));
   }
-  for (const dose of card.doses) item.append(recorded('p', 'card__dose', dose));
+  open.addEventListener('click', () => handlers.onOpenNight());
+
+  item.append(open);
   return item;
 };
 
@@ -160,7 +178,7 @@ const emptySlotItem = (card: EmptySlotCard, handlers: DayLogHandlers): HTMLEleme
 
 const cardElement = (card: DayCard, handlers: DayLogHandlers): HTMLElement => {
   if (card.kind === 'meal') return mealCardItem(card, handlers);
-  if (card.kind === 'night') return nightCardItem(card);
+  if (card.kind === 'night') return nightCardItem(card, handlers);
   return emptySlotItem(card, handlers);
 };
 

@@ -33,10 +33,20 @@ import {
   type FoodDraft,
   type MealDraft,
 } from './domain/meal-draft';
+import {
+  newNightDraft,
+  nightDraftFrom,
+  nightDraftRefusal,
+  nightRecording,
+  nightRows,
+  NIGHT_WINDOW,
+  type NightDraft,
+} from './domain/night';
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { FOOD_FORM_TITLE, foodForm } from './ui/food-form';
 import { mealForm, mealFormTitle } from './ui/meal-form';
+import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { shell, type ShellHandlers } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
 
@@ -65,9 +75,15 @@ const start = (): void => {
   let readToken = 0;
 
   /** Which screen the signed-in person is on. Today unless a meal is being filled in. */
-  let screen: 'day' | 'meal' | 'food' = 'day';
+  let screen: 'day' | 'meal' | 'food' | 'night' = 'day';
   let mealDraft: MealDraft | null = null;
   let foodDraft: FoodDraft | null = null;
+  let nightDraft: NightDraft | null = null;
+  /**
+   * The five nights the night screen lists. Read before the screen is shown, not
+   * after, so the list is never a row of blanks that reads as five empty nights.
+   */
+  let nightHistory: NightHistory | null = null;
   /** A refusal or retry from the screen the person is on, shown in place. */
   let formMessage: string | null = null;
   let saving = false;
@@ -86,6 +102,7 @@ const start = (): void => {
         onRetry: () => void loadDayLog(),
         onLogSlot: (slot) => logSlot(slot),
         onEditMeal: (id) => editMeal(id),
+        onOpenNight: () => void openNight(),
       }),
     );
 
@@ -124,7 +141,28 @@ const start = (): void => {
       ),
     );
 
+  const nightScreen = (draft: NightDraft, history: NightHistory): HTMLElement =>
+    shell(
+      {
+        date,
+        isToday: date === localToday(),
+        form: { title: NIGHT_FORM_TITLE, busy: saving },
+      },
+      { ...dayHandlers, onCancel: () => leaveForm(), onSave: () => void saveNight() },
+      nightForm(
+        { draft, history, message: formMessage },
+        {
+          onUnits: (units) => patchNight({ units }),
+          onTakenAt: (takenAt) => patchNight({ takenAt }),
+          onBedtimeGlucose: (bedtimeGlucose) => patchNight({ bedtimeGlucose }),
+        },
+      ),
+    );
+
   const signedInScreen = (): HTMLElement => {
+    if (screen === 'night' && nightDraft !== null && nightHistory !== null) {
+      return nightScreen(nightDraft, nightHistory);
+    }
     if (screen === 'food' && foodDraft !== null) return foodScreen(foodDraft);
     if (screen === 'meal' && mealDraft !== null) return mealScreen(mealDraft);
     return todayScreen();
@@ -153,11 +191,52 @@ const start = (): void => {
     if (foodDraft !== null) foodDraft = { ...foodDraft, ...change };
   };
 
+  const patchNight = (change: Partial<NightDraft>): void => {
+    if (nightDraft !== null) nightDraft = { ...nightDraft, ...change };
+  };
+
+  /**
+   * The night screen, reached from Today's night insulin card and recording
+   * against the date Today is reading. The night already on the date is opened as
+   * the draft, id and all, so saving updates that night rather than adding a
+   * second one. The five nights are read before the screen is shown.
+   */
+  const openNight = async (): Promise<void> => {
+    if (dayLogState.kind !== 'loaded') return;
+    const recordedNight = dayLogState.log.nightInsulin[0];
+    const opening = date;
+
+    const outcome = await logStore.recentNights(opening, NIGHT_WINDOW);
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return;
+    }
+    // A step to another day while the read was in flight wins: the screen must
+    // never open on one date holding another date's nights.
+    if (opening !== date) return;
+
+    nightDraft =
+      recordedNight === undefined
+        ? newNightDraft(opening)
+        : nightDraftFrom(recordedNight, opening);
+    nightHistory =
+      outcome.kind === 'loaded'
+        ? { kind: 'loaded', rows: nightRows(outcome.window) }
+        : { kind: 'failed', message: outcome.message };
+    mealDraft = null;
+    foodDraft = null;
+    formMessage = null;
+    screen = 'night';
+    render();
+  };
+
   const logSlot = (slot: MealSlot): void => {
     // The slot comes through already chosen, and the meal is recorded against the
     // date being read rather than against the server's idea of now.
     mealDraft = newMealDraft(date, slot);
     foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
     formMessage = null;
     screen = 'meal';
     render();
@@ -171,6 +250,8 @@ const start = (): void => {
     // after reading later cannot produce a second meal on the date.
     mealDraft = mealDraftFrom(meal, date);
     foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
     formMessage = null;
     screen = 'meal';
     render();
@@ -179,6 +260,8 @@ const start = (): void => {
   const leaveForm = (): void => {
     mealDraft = null;
     foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
     formMessage = null;
     screen = 'day';
     render();
@@ -257,12 +340,55 @@ const start = (): void => {
     render();
   };
 
+  const saveNight = async (): Promise<void> => {
+    const draft = nightDraft;
+    if (draft === null || saving) return;
+
+    const recording = nightRecording(draft);
+    if (recording === null) {
+      // Refused in place: the screen stays, says why, and nothing is written, so
+      // the night already on the date is untouched by the refusal.
+      formMessage = nightDraftRefusal(draft);
+      render();
+      return;
+    }
+
+    saving = true;
+    formMessage = null;
+    render();
+
+    const outcome = await logStore.saveNight(recording);
+    saving = false;
+
+    if (outcome.kind === 'saved') {
+      // Back to Today for the same date, and the day is re-read: the night card
+      // shows what the store holds rather than what the form believed it wrote.
+      nightDraft = null;
+      nightHistory = null;
+      formMessage = null;
+      screen = 'day';
+      void loadDayLog();
+      return;
+    }
+
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return;
+    }
+
+    // A refusal or a retry keeps every value the person entered on screen.
+    formMessage = outcome.message;
+    render();
+  };
+
   const endSession = async (message: string): Promise<void> => {
     await identity.signOut();
     account = null;
     screen = 'day';
     mealDraft = null;
     foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
     formMessage = null;
     saving = false;
     signInState = { ...emptySignInState, message };
@@ -315,6 +441,8 @@ const start = (): void => {
     screen = 'day';
     mealDraft = null;
     foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
     formMessage = null;
     saving = false;
     if (account === null) {

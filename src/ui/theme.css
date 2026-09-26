@@ -470,3 +470,60 @@ label {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ------------------------------------------------------- the night screen */
+
+.night-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.night-history__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* A night reads as its date, its dose and the morning that followed. The row
+   wraps rather than widening, so nothing pushes the document sideways at 360 px. */
+.night-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.night-row__date {
+  color: var(--ink-muted);
+  min-width: 4rem;
+}
+
+.night-row__dose {
+  font-weight: 600;
+}
+
+/* The morning reading is the only banded thing on the row, and its colour is
+   bound to the published level band rather than written into the markup. */
+.night-row__morning {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+/* A morning nobody measured is furniture, not a reading: it is drawn as quietly
+   as the rest of the row's labels and carries no band colour of any kind. */
+.night-row__morning--unmeasured {
+  color: var(--ink-muted);
+  font-weight: 400;
+}

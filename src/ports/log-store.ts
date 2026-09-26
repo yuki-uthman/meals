@@ -1,5 +1,6 @@
 import type { DayLog, IsoDate } from '../domain/entry';
 import type { MealRecording } from '../domain/meal-draft';
+import type { NightRecording, NightWindow } from '../domain/night';
 
 // Reading the signed-in account's own entries for one date, and recording a meal.
 //
@@ -31,6 +32,27 @@ export type SaveMealOutcome =
   /** The session is gone, so the write had no owner to run as. */
   | { readonly kind: 'session-ended'; readonly message: string };
 
+/**
+ * What the store says when the night could not be written. The dose is the whole
+ * record, so a write that did not land leaves the date exactly as it was.
+ */
+export const NIGHT_NOT_SAVED = 'Could not save the night. Nothing was recorded.';
+
+export type SaveNightOutcome =
+  | { readonly kind: 'saved'; readonly id: string }
+  /** The write was undone or never happened. Nothing on the date changed. */
+  | { readonly kind: 'refused'; readonly message: string }
+  /** The server could not be reached. The person's values are kept on screen. */
+  | { readonly kind: 'retry'; readonly message: string }
+  /** The session is gone, so the write had no owner to run as. */
+  | { readonly kind: 'session-ended'; readonly message: string };
+
+export type NightWindowOutcome =
+  | { readonly kind: 'loaded'; readonly window: NightWindow }
+  /** The server could not be reached. Show no nights rather than stale ones. */
+  | { readonly kind: 'retry'; readonly message: string }
+  | { readonly kind: 'session-ended'; readonly message: string };
+
 export type LogStore = {
   dayLog: (date: IsoDate) => Promise<DayLogOutcome>;
   /**
@@ -39,4 +61,16 @@ export type LogStore = {
    * row rather than write a second meal on the date.
    */
   saveMeal: (recording: MealRecording) => Promise<SaveMealOutcome>;
+  /**
+   * Records the night dose for its date, or updates the night already there. One
+   * night per account per date, so this never adds a second one.
+   */
+  saveNight: (recording: NightRecording) => Promise<SaveNightOutcome>;
+  /**
+   * The `count` most recent nights strictly before `before`, newest first, with
+   * the meals on the dates that follow them. The store hands back the material
+   * and the domain decides which meal supplies a morning reading, so the
+   * derivation is not buried in a query.
+   */
+  recentNights: (before: IsoDate, count: number) => Promise<NightWindowOutcome>;
 };

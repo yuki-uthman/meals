@@ -1,6 +1,14 @@
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { SESSION_ENDED, UNREACHABLE_SERVER } from '../../ports/identity';
-import { MEAL_NOT_SAVED, type DayLogOutcome, type LogStore, type SaveMealOutcome } from '../../ports/log-store';
+import {
+  MEAL_NOT_SAVED,
+  type DayLogOutcome,
+  type LogStore,
+  type NightWindowOutcome,
+  type SaveMealOutcome,
+  type SaveNightOutcome,
+} from '../../ports/log-store';
+import { shiftDate } from '../../domain/entry';
 import type {
   DayLog,
   ExerciseContext,
@@ -12,6 +20,7 @@ import type {
   NightInsulin,
 } from '../../domain/entry';
 import type { FoodRecording, MealRecording } from '../../domain/meal-draft';
+import type { MorningMeal, NightRecording, NightWindow } from '../../domain/night';
 
 // PostgREST behind the log-store port.
 //
@@ -127,6 +136,18 @@ const toSaveFailure = (error: PostgrestError, status: number): SaveMealOutcome =
     ? { kind: 'session-ended', message: SESSION_ENDED }
     : { kind: 'retry', message: UNREACHABLE_SERVER };
 
+/** And for the night's write path, read exactly the same way. */
+const toNightFailure = (error: PostgrestError, status: number): SaveNightOutcome =>
+  isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+
+/** And for the five-night read. */
+const toWindowFailure = (error: PostgrestError, status: number): NightWindowOutcome =>
+  isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+
 /**
  * The meal row's own columns. No user_id: the column defaults to auth.uid() and
  * the insert policy checks it, so the owner of a written row is decided by
@@ -217,6 +238,51 @@ const updateMeal = async (
   return { kind: 'saved', id };
 };
 
+/**
+ * The night row's own columns. No user_id here either: the column defaults to
+ * auth.uid() and the insert policy checks it, so who owns a written night is
+ * decided by Postgres and cannot be asked for by the browser.
+ */
+const nightFields = (recording: NightRecording): Record<string, unknown> => ({
+  // night_on, never taken_at, is what a day is selected on, so a 22:30 dose
+  // cannot drift into the neighbouring day when the server's offset differs.
+  night_on: recording.nightOn,
+  units: recording.units,
+  taken_at: recording.takenAt === null ? null : recording.takenAt.toISOString(),
+  bedtime_glucose: recording.bedtimeGlucose,
+});
+
+/**
+ * The night already recorded for the date, if any. One night per account per
+ * date is the rule, so a save that did not come from an opened record still
+ * updates that night rather than adding a second one.
+ */
+const existingNightId = async (
+  client: SupabaseClient,
+  nightOn: IsoDate,
+): Promise<{ readonly id: string | null } | SaveNightOutcome> => {
+  // No user_id filter: row-level security is what limits this to the caller's
+  // own night, so the id that comes back can only ever be theirs.
+  const found = await client.from('night_insulin').select('id').eq('night_on', nightOn).limit(1);
+  if (found.error !== null) return toNightFailure(found.error, found.status);
+  const rows = Array.isArray(found.data) ? (found.data as { id?: unknown }[]) : [];
+  return { id: rows.length === 0 ? null : String(rows[0]?.id) };
+};
+
+const MORNING_SELECT = 'eaten_on, eaten_at, glucose_before';
+
+type MorningRow = {
+  eaten_on?: unknown;
+  eaten_at?: unknown;
+  glucose_before?: unknown;
+};
+
+const toMorningMeal = (row: MorningRow): MorningMeal => ({
+  eatenOn: String(row.eaten_on),
+  eatenAt: new Date(String(row.eaten_at)),
+  glucoseBefore: asNumber(row.glucose_before),
+});
+
 export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
   saveMeal: async (recording: MealRecording): Promise<SaveMealOutcome> => {
     try {
@@ -226,6 +292,79 @@ export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
     } catch {
       // The request never got an answer at all, so whether Postgres committed is
       // unknown. It is reported as worth retrying and never retried here.
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
+  saveNight: async (recording: NightRecording): Promise<SaveNightOutcome> => {
+    try {
+      let id = recording.id;
+      if (id === null) {
+        const found = await existingNightId(client, recording.nightOn);
+        if ('kind' in found) return found;
+        id = found.id;
+      }
+
+      if (id === null) {
+        const created = await client
+          .from('night_insulin')
+          .insert(nightFields(recording))
+          .select('id')
+          .single();
+        if (created.error !== null) return toNightFailure(created.error, created.status);
+        return { kind: 'saved', id: String((created.data as { id?: unknown }).id) };
+      }
+
+      // Updating the night the date already holds, so recording twice corrects
+      // the night rather than putting two nights on one date.
+      const updated = await client
+        .from('night_insulin')
+        .update(nightFields(recording))
+        .eq('id', id)
+        .select('id');
+      if (updated.error !== null) return toNightFailure(updated.error, updated.status);
+      return { kind: 'saved', id };
+    } catch {
+      // The request never got an answer at all, so whether Postgres committed is
+      // unknown. It is reported as worth retrying and never retried here.
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
+  recentNights: async (before: IsoDate, count: number): Promise<NightWindowOutcome> => {
+    try {
+      // Strictly before the date being recorded, newest first, and no more than
+      // the screen lists. Selected on night_on, never on taken_at.
+      const nightResult = await client
+        .from('night_insulin')
+        .select(NIGHT_SELECT)
+        .lt('night_on', before)
+        .order('night_on', { ascending: false })
+        .limit(count);
+      if (nightResult.error !== null) return toWindowFailure(nightResult.error, nightResult.status);
+
+      const nights = ((nightResult.data ?? []) as NightRow[]).map(toNightInsulin);
+      if (nights.length === 0) {
+        return { kind: 'loaded', window: { nights, mornings: [] } };
+      }
+
+      // The meals that could supply a morning: the ones on the date following
+      // each night. Which of them is the morning is the domain's rule, not this
+      // query's, so every candidate on those dates comes back.
+      const morningDates = nights.map((night) => shiftDate(night.nightOn, 1));
+      const mealResult = await client
+        .from('meals')
+        .select(MORNING_SELECT)
+        .in('eaten_on', morningDates)
+        .order('eaten_at', { ascending: true });
+      if (mealResult.error !== null) return toWindowFailure(mealResult.error, mealResult.status);
+
+      const window: NightWindow = {
+        nights,
+        mornings: ((mealResult.data ?? []) as MorningRow[]).map(toMorningMeal),
+      };
+      return { kind: 'loaded', window };
+    } catch {
       return { kind: 'retry', message: UNREACHABLE_SERVER };
     }
   },
