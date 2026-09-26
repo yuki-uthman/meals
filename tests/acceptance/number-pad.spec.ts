@@ -14,7 +14,7 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  * holds and handed back through real row-level security, not numbers a fixture invented
  * inside the page.
  *
- * Three claims carry this value and the oracle is built around them:
+ * Four claims carry this value and the oracle is built around them:
  *
  *  - The pad writes into the SAME labelled input value 3 declared. So the field is located
  *    by its label, is asserted editable rather than readonly, and its value is read back
@@ -29,6 +29,11 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    that same meal's before reading of 112 -- and 'Before last dinner 110' is the before
  *    reading of the most recent meal in the slot being recorded. A rule that took the
  *    before reading, or the wrong slot, would show 112 and fail here.
+ *  - A value typed straight into a glucose field SURVIVES being focused, and the pad opens
+ *    seeded from it. This is judged by filling the field without the pad, focusing it, and
+ *    then asking the pad to Delete: the value must lose exactly its rightmost digit. An
+ *    implementation that re-rendered or reset the input on focus would eat a
+ *    hardware-keyboard user's first keystroke, and would break value 3's oracle too.
  *
  * Widgets are located tolerantly by their accessible names, because whether a key is a
  * button in a fieldset or a cell in a grid is a presentation choice, while the pad's name,
@@ -181,15 +186,19 @@ const logFromEmptyCard = async (page: Page, slot: string): Promise<void> => {
 };
 
 /**
- * The fields, restricted to the input the person's value lives in. The restriction is not
- * decoration: the stepper's buttons are named 'Decrease dose' and 'Increase dose', so a
- * label match on 'dose' alone would resolve to three elements and the oracle would be
- * asserting a value on a button.
+ * The fields, each by its EXACT label, as value 3 settled and this value's design repeats.
+ * This is not a stylistic choice: the stepper's buttons are named 'Decrease dose' and
+ * 'Increase dose', so a loose match like /units|dose/i resolves to three elements on this
+ * very screen and the oracle would end up asserting a value on a button. On one screen a
+ * label and a control name must be distinguishable by exact match, and the oracle must use
+ * that exact match rather than a pattern that is unique only by accident.
  */
 const glucoseBeforeField = (page: Page): Locator =>
-  page.getByLabel(/glucose before/i).and(page.locator('input'));
+  page.getByLabel('Glucose before', { exact: true });
+const glucoseAfterField = (page: Page): Locator =>
+  page.getByLabel('Glucose after', { exact: true });
 const doseField = (page: Page): Locator =>
-  page.getByLabel(/units|dose/i).and(page.locator('input'));
+  page.getByLabel('Rapid-acting units', { exact: true });
 
 const pad = (page: Page): Locator => page.getByRole('group', { name: /^number pad$/i });
 
@@ -321,6 +330,30 @@ test('a glucose field opens the pad with its chips, keys exactly, and a dose ste
   await dose.fill('0');
   await decrease.click();
   await expect(dose, 'decrease at zero leaves the dose at zero').toHaveValue('0');
+
+  // --- A value put into a glucose field directly survives being focused ----
+
+  // Filled without the pad at all, exactly the way value 3's oracle fills it, so the field
+  // is still an ordinary input a hardware keyboard and an automated fill can both reach.
+  const after = glucoseAfterField(phone);
+  await expect(after, "'Glucose after' still names one editable input").toBeEditable();
+  await after.fill('182');
+  await expect(after, 'the field takes a value typed straight into it').toHaveValue('182');
+
+  await after.focus();
+
+  // Focusing is how a person with a hardware keyboard starts typing, and it is what opens
+  // the pad. The pad must assist the field rather than replace it: a re-render that
+  // discarded or reset the input would eat that first keystroke, and would break value 3's
+  // oracle in the same breath.
+  await expect(pad(phone), 'focusing a glucose field opens the pad').toBeVisible();
+  await expect(after, 'the value already in the field survives being focused').toHaveValue('182');
+
+  // And the pad genuinely SEEDED itself from that value rather than starting blank beside
+  // it: Delete takes the rightmost digit of 182. A pad holding its own empty entry would
+  // leave the field at 182 or would clear it, and either way fails here.
+  await press(phone, 'Delete');
+  await expect(after, 'the pad opened on the value the field already held').toHaveValue('18');
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
