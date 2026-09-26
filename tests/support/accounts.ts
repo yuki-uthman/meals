@@ -59,6 +59,9 @@ export const seedAccounts = async (stack: LocalStack): Promise<SeededAccounts> =
     .insert({
       user_id: owner.id,
       slot: 'breakfast',
+      // The day log selects on eaten_on, never on eaten_at, so a 22:30 row cannot
+      // drift into the neighbouring day when the server's offset is not the phone's.
+      eaten_on: localDateOnly(today),
       eaten_at: localTime(today, 7, 40),
       glucose_before: 104,
       glucose_after: 186,
@@ -71,8 +74,24 @@ export const seedAccounts = async (stack: LocalStack): Promise<SeededAccounts> =
   }
 
   const foods = await admin.from('meal_foods').insert([
-    { user_id: owner.id, meal_id: meal.data.id, name: 'Oats', amount: 60, unit: 'g', position: 1 },
-    { user_id: owner.id, meal_id: meal.data.id, name: 'Milk', amount: 200, unit: 'ml', position: 2 },
+    {
+      user_id: owner.id,
+      meal_id: meal.data.id,
+      name: 'Oats',
+      food_type: 'carb-heavy',
+      amount: 60,
+      unit: 'g',
+      position: 1,
+    },
+    {
+      user_id: owner.id,
+      meal_id: meal.data.id,
+      name: 'Milk',
+      food_type: 'dairy',
+      amount: 200,
+      unit: 'ml',
+      position: 2,
+    },
   ]);
   if (foods.error) {
     throw new Error(`could not seed account A's foods: ${foods.error.message}`);
