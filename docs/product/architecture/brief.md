@@ -65,6 +65,8 @@ functional
 - meal_foods.food_type is not null with a check constraint over the seven types the brief fixes: carb-heavy, protein, vegetable, fruit, dairy, mixed dish, drink. The seeded foods are Oats as carb-heavy and Milk as dairy.
 - The shell opens on today's local calendar date. This value has no date-selection surface; value 2 adds the day stepper the canvas shows.
 - Browser sources typecheck under exactOptionalPropertyTypes, so a local type mirroring an SDK type with an optional property must spell it `prop?: T | undefined`. Supabase's AuthError.status is number | undefined and will not satisfy a bare `status?: number`.
+- Every element that renders data the signed-in account actually recorded carries a data-entry attribute: a food with its amount, a clock time, a dose, a glucose reading. Screen furniture never does -- slot labels, headings, the date, and any 'not logged' placeholder are the same for every account and are not anybody's data. Ownership is judged on data-entry elements, so the oracle keeps its meaning when a later value reshapes the surface.
+- 'No entries yet.' is what this value renders for a date the account has nothing on, but it is not what the oracle asserts. The oracle asserts that the page carries no data-entry element, because value 2 replaces that sentence with fixed slot cards and the ownership rule must outlive the wording.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -98,9 +100,9 @@ Observation: A person opens the site on a phone, signs in with email and passwor
 
 Stimulus: Two accounts exist in the local Supabase stack. Account A owns, dated today in local terms: one meals row (slot breakfast, eaten_on today, eaten_at 07:40, glucose_before 104, glucose_after 186, insulin_units 5) with two meal_foods rows (Oats, carb-heavy, 60 g and Milk, dairy, 200 ml), and one night_insulin row (night_on today, units 18, taken_at 22:30, bedtime_glucose 132). Account B owns no rows in any of the three tables. One browser page at a 360 px viewport loads the built static bundle, signs in as account A and reads the day log, then uses the 'Sign out' control and signs in as account B on the same page and reads the day log again.
 
-Expected: Signed in as account A the day log shows the line 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml' and the line '18 u at 22:30'. Signing out returns the sign-in screen. Signed in as account B the day log shows exactly 'No entries yet.' and neither of account A's lines, nor any other text from account A's rows, appears anywhere on the page. Account A signing in again still sees its own two lines, so the empty log was row-level security and not a lost seed. Both sign-ins succeed and the page never scrolls horizontally.
+Expected: Signed in as account A the day log carries data-entry elements whose text includes 'Oats 60 g', 'Milk 200 ml', '07:40', '5 u', '104', '186' and '18 u at 22:30'. Signing out returns the sign-in screen. Signed in as account B the day log carries no data-entry element at all, and none of account A's recorded text appears anywhere on the page. Account A signing in again still carries its own data-entry elements, so account B's empty log was row-level security and not a lost seed. Both sign-ins succeed and the page never scrolls horizontally.
 
-Falsifier: Account B's page contains any text from a row account A owns, or account A's own two lines are missing from its day log on either sign-in, or signing out leaves the shell on screen, or either account cannot sign in with correct credentials, or the document scrolls horizontally at a 360 px viewport.
+Falsifier: Account B's page carries any data-entry element, or any text from a row account A owns, or account A's page is missing any of its own recorded values on either sign-in, or signing out leaves the shell on screen, or either account cannot sign in with correct credentials, or the document scrolls horizontally at a 360 px viewport. Slot labels, headings and placeholders are screen furniture and must NOT be treated as account A's data: asserting their absence would falsely fail once value 2 draws a card per slot.
 
 ### Oracle and verification
 Oracle target locator: `tests/acceptance/own-data-only.spec.ts`
@@ -148,6 +150,8 @@ functional
 - The header shows the weekday and date above the heading, and the heading is 'Today' when the date being read is the local today and the date itself otherwise. Previous-day and next-day controls carry the accessible names 'Previous day' and 'Next day'; the next-day control is disabled when the date being read is today, because the log has no future.
 - The date being read lives in the composition root, not in a screen. Moving it re-reads the day log through the same port, so nothing caches another day's rows.
 - Cards are read-only in this value. Nothing on the Today screen opens a meal or records one; value 3 records and value 6 opens.
+- Value 1's data-entry rule carries forward unchanged: a meal card's time, foods, dose and readings each carry data-entry, and the night insulin dose line carries it. A slot label, a heading, the date and a 'Not logged yet' placeholder never do, because they are the same for every account.
+- 'No entries yet.' is retired by this value. A date with nothing on it shows the three fixed slot cards reading 'Not logged yet' and a night insulin card reading 'Not logged yet', which is what the observation asks for and is also the surface value 3 logs from.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -167,7 +171,7 @@ Existing oracle: `tests/acceptance/own-data-only.spec.ts`
 
 Move: Before the cards are built, lift the band rules out of nothing and into src/domain/band.ts, and split the day log's loaded branch from its loading, failed and retry branches, so the card work touches one branch of one function rather than rewriting the screen.
 
-Preserved observation: A person signs in and sees only their own entries for the date, and a second account sees none of them. Value 1's oracle keeps passing throughout, because the rows read and the port they are read through do not change.
+Preserved observation: A person signs in and sees only their own entries for the date, and a second account sees none of them. Value 1's oracle keeps passing because it judges ownership on data-entry elements, which the cards carry and the slot labels and placeholders do not.
 
 ### Agreement analysis
 Not applicable: No released contract changes. The schema is untouched and the log-store port keeps its shape, so no producer or consumer is left on an older agreement.
@@ -190,7 +194,7 @@ Observation: After sign-in the Today screen shows the date, a card per logged me
 
 Stimulus: Account A owns, dated today in local terms: a breakfast at 07:40 (Oats carb-heavy 60 g, Milk dairy 200 ml, before 104, after 186, 5 units) and a lunch at 12:55 (Chicken rice mixed dish 250 g, Cucumber salad vegetable 80 g, before 112, after 133, 6 units), no dinner, and night insulin of 18 units at 22:30 with bedtime glucose 132. Dated yesterday it owns a single dinner at 19:10 (Soup mixed dish 300 ml, before 150, after 110, 4 units). A browser at a 360 px viewport signs in as account A on the built bundle, reads the Today screen, then uses the previous-day control.
 
-Expected: The header reads 'Today'. A Breakfast card shows 07:40, 'Oats 60 g · Milk 200 ml', '5 u', '104', '186' and '+82' in the rose-high change band. A Lunch card shows 12:55, 'Chicken rice 250 g · Cucumber salad 80 g', '6 u', '112', '133' and '+21' in the stable change band. A Dinner card shows 'Not logged yet'. A night insulin card shows 'Night insulin' and '18 u at 22:30'. The next-day control is disabled. After the previous-day control the header shows yesterday's date rather than 'Today', a Dinner card shows 19:10 and '−40' in the dropped change band, and Breakfast and Lunch both show 'Not logged yet'. The page never scrolls horizontally.
+Expected: The header reads 'Today'. A Breakfast card shows 07:40, 'Oats 60 g · Milk 200 ml', '5 u', '104', '186' and '+82' in the rose-high change band. A Lunch card shows 12:55, 'Chicken rice 250 g · Cucumber salad 80 g', '6 u', '112', '133' and '+21' in the stable change band. A Dinner card shows 'Not logged yet'. A night insulin card shows 'Night insulin' and '18 u at 22:30'. The next-day control is disabled. After the previous-day control the header shows yesterday's date rather than 'Today', a Dinner card shows 19:10 and '−40' in the dropped change band, and Breakfast and Lunch both show 'Not logged yet'. The page never scrolls horizontally. Account A's own values carry data-entry; the 'Not logged yet' cards and the slot labels do not.
 
 Falsifier: Any of those card texts is absent or attached to the wrong slot, or a change is unsigned or wrongly signed, or a change carries the wrong band name, or an empty slot shows anything but 'Not logged yet', or the night insulin card is missing, or the next-day control is usable while today is being read, or the previous-day control does not move the date and its entries, or the document scrolls horizontally at a 360 px viewport.
 
