@@ -490,7 +490,12 @@ test('a result opens that meal', async ({ browser }) => {
   await expect(detail, 'the result opened a meal detail').toBeVisible();
   const detailText = await textOf(detail);
   expect(detailText, 'the result opened the dinner it named').toMatch(/dinner/i);
-  for (const fragment of ['110', '142', '6 u', 'Chicken rice 250 g']) {
+  // The detail is value 6's screen and value 6's design fixes its shape: what was eaten lists
+  // the food's name, its type and its amount as three separate items, so the detail reads
+  // 'Chicken rice Mixed dish 250 g'. The contiguous 'Chicken rice 250 g' is the LOOKUP
+  // RESULT's wording, asserted on the result card above, and asserting it here would demand
+  // the detail drop the food type that value 6 requires. So the parts are asserted as parts.
+  for (const fragment of ['110', '142', '6 u', 'Chicken rice', '250 g']) {
     expect(detailText, `the detail reads ${fragment}`).toContain(fragment);
   }
 
