@@ -222,7 +222,17 @@ const nightRows = async (page: Page): Promise<Locator> => {
   return page.getByRole('row');
 };
 
-const doseField = (page: Page): Locator => page.getByLabel(/units|dose/i);
+/**
+ * The three fields, by the exact labels the design fixes. 'Taken at' rather than 'Time'
+ * is not a preference: 'Time' is a substring of 'Bedtime glucose', so a loose match on it
+ * resolves to the bedtime field instead and no implementation could satisfy it. Labels on
+ * one screen must not contain one another, and the oracle names them exactly so a screen
+ * that reintroduces the collision fails here rather than silently filling the wrong box.
+ */
+const doseField = (page: Page): Locator => page.getByLabel('Dose', { exact: true });
+const takenAtField = (page: Page): Locator => page.getByLabel('Taken at', { exact: true });
+const bedtimeGlucoseField = (page: Page): Locator =>
+  page.getByLabel('Bedtime glucose', { exact: true });
 
 test('the night dose is recorded and the last five nights read as dose and next-morning reading', async ({
   browser,
@@ -297,9 +307,16 @@ test('the night dose is recorded and the last five nights read as dose and next-
 
   // --- Recording tonight ---------------------------------------------------
 
+  // Three distinct fields, each resolving to exactly one control. If two labels
+  // collided, one of these would be ambiguous and fail rather than quietly overwrite
+  // the other field's value.
+  await expect(doseField(phone), "'Dose' names one field").toHaveCount(1);
+  await expect(takenAtField(phone), "'Taken at' names one field").toHaveCount(1);
+  await expect(bedtimeGlucoseField(phone), "'Bedtime glucose' names one field").toHaveCount(1);
+
   await doseField(phone).fill('18');
-  await phone.getByLabel(/time/i).fill('22:30');
-  await phone.getByLabel(/bedtime/i).fill('128');
+  await takenAtField(phone).fill('22:30');
+  await bedtimeGlucoseField(phone).fill('128');
   await save(phone);
 
   // Back on Today for the same date, showing what the store holds.
@@ -312,10 +329,15 @@ test('the night dose is recorded and the last five nights read as dose and next-
   await phone.reload();
   expect(await textOf(await card(phone, 'Night insulin'))).toContain('18 u at 22:30');
 
-  // One night per date: the save wrote one record, so the card carries exactly one dose
-  // line rather than a second night for the same date.
-  const doseLines = (await card(phone, 'Night insulin')).locator('[data-entry]');
-  await expect(doseLines, 'exactly one night is recorded for the date').toHaveCount(1);
+  // One night per date: the save wrote one record, so the dose line appears once rather
+  // than twice. Counted on the text and not on the number of data-entry elements,
+  // because how many elements a card divides its own data into is a presentation choice
+  // while 'two nights on one date' is the rule being falsified.
+  const reread = await textOf(await card(phone, 'Night insulin'));
+  expect(
+    reread.match(/18 u at 22:30/g)?.length ?? 0,
+    'exactly one night is recorded for the date',
+  ).toBe(1);
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 
