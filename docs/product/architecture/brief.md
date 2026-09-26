@@ -250,6 +250,7 @@ functional
 - Saving returns to Today for the same date and the day is re-read, so the new card is what the store holds rather than what the form believed it wrote.
 - Out of scope here and named so the form is not mistaken for finished: 'Start from a past meal' is value 7, the last-time suggestion box is value 8, and the in-app number pad and dose stepper are value 5. The reminder toggle the canvas draws is not in any value and is not built.
 - The acceptance suite starts the local stack and applies migrations once per run, not once per spec: a reset restarts containers and costs about ninety seconds, and the suite is a declared verification vector that grows with every value. A spec isolates itself by removing its own accounts and rows through the service role, and seeds accounts under its own email prefix.
+- A band boundary is checked against the brief, not guessed: 150 to 182 is +32, which is rose (+31 to +60), not stable (−39 to +30). The first draft of this design said stable and the oracle faithfully encoded that error, so the arithmetic is spelled out here.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -293,7 +294,7 @@ Observation: The user records a meal with slot, time, one or more foods (name, t
 
 Stimulus: Account A owns nothing. On the built bundle at a 360 px viewport it signs in, uses the Dinner slot's 'Not logged yet' card, and records: time 19:10, glucose before 150, food 'Chicken rice' of type Mixed dish, amount 250 g, a second food 'Cucumber salad' of type Vegetable, amount 80 g, dose 6 units, exercise context 'Before meal', note 'walked home', and no after reading. It saves. It then uses that card's Edit control, enters glucose after 182 and saves again. Separately, on a fresh New meal with no food added, it uses Save.
 
-Expected: After the first save Today shows a Dinner card with 19:10, 'Chicken rice 250 g · Cucumber salad 80 g', '6 u' and '150' with no change shown, because there is no after reading yet. After the edit the same single Dinner card shows '150', '182' and '+32' in the stable change band, and there is still exactly one dinner on the date. Saving a meal with no food is refused in place with 'Add at least one food.' and Today gains no card. The page never scrolls horizontally.
+Expected: After the first save Today shows a Dinner card with 19:10, 'Chicken rice 250 g · Cucumber salad 80 g', '6 u' and '150' with no change shown, because there is no after reading yet. After the edit the same single Dinner card shows '150', '182' and '+32' in the rose change band, because the brief puts stable at −39 to +30 and +32 is above it, and there is still exactly one dinner on the date. Saving a meal with no food is refused in place with 'Add at least one food.' and Today gains no card. The page never scrolls horizontally.
 
 Falsifier: A recorded value is missing from the card or wrong, or a change is drawn before an after reading exists, or the edit creates a second dinner rather than updating the first, or a meal with no food is written, or the note, the exercise context or the food types are not what was entered when the meal is reopened, or the document scrolls horizontally at a 360 px viewport.
 
