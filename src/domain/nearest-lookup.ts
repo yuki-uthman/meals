@@ -1,5 +1,8 @@
-// Looking a CHANGE up in the log: which past meals moved the glucose by about the
-// amount asked for, nearest first, and how far off each one was.
+// Looking a NEAREST MATCH up in the log: which past meals were about where the
+// person asked, nearest first, and how far off each one was. Two questions share
+// these rules -- by CHANGE, which matches how much the glucose moved, and by
+// START, which matches the reading the meal began on -- because the window, the
+// distance and the order are one idea asked of two quantities.
 //
 // Every rule this value is judged on lives here rather than in a query or in the
 // screen: what a window admits, how far off a meal is, and what order the results
@@ -68,7 +71,6 @@ export type NearestResult = LookupResult & {
 /** A meal that is in the window, with the arithmetic that put it there. */
 type Nearest = {
   readonly meal: MealInstance;
-  readonly change: number;
   readonly distance: number;
 };
 
@@ -99,7 +101,7 @@ export const nearestByChange = (
       if (change === null) return [];
       const distance = Math.abs(change - target);
       // The bound is a tolerance: outside it the meal is not listed at all.
-      return distance > bound ? [] : [{ meal, change, distance }];
+      return distance > bound ? [] : [{ meal, distance }];
     })
     .sort(nearestFirst)
     .map((nearest) => nearest.meal);
@@ -147,4 +149,106 @@ export const nearestView = (
   const meals = nearestByChange(history, target, bound);
   if (meals.length === 0) return { kind: 'none', message: NO_CHANGE_MATCHES };
   return { kind: 'found', results: meals.map((meal) => resultOf(meal, target)) };
+};
+
+// ------------------------------------------------- looking a START up
+//
+// The other question a person asks of the same log: not 'what moved me by this
+// much' but 'what happened the last times I STARTED here'. The quantity matched
+// is the meal's BEFORE reading, and everything else about a result is the same,
+// because one row shape across all three lookups is the point.
+
+/**
+ * This value's own three windows, and the one it starts on. They are NOT the
+ * change windows: a tolerance on a READING is a coarser thing than a tolerance
+ * on a change, so ±5, ±10 and ±20 rather than ±2, ±5 and ±10.
+ */
+export const START_WINDOWS = [5, 10, 20] as const;
+
+export type StartWindow = (typeof START_WINDOWS)[number];
+
+export const DEFAULT_START_WINDOW: StartWindow = 10;
+
+/** '±10': how a window is named, wherever it is named. */
+export const startWindowLabel = (bound: StartWindow): string => `±${bound}`;
+
+/**
+ * The starting reading as typed: an UNSIGNED whole number of mg/dL, because a
+ * reading is never negative -- unlike a change, where −20 and +40 are both
+ * askable. Anything else is nothing at all rather than zero, so the screen goes
+ * on inviting a reading instead of answering a question nobody asked.
+ */
+export const parseStartTarget = (typed: string): number | null => {
+  const text = typed.trim();
+  if (!/^\d+$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value > 0 ? value : null;
+};
+
+/**
+ * The meals whose BEFORE reading is within the window of the target, nearest
+ * first. A meal with no before reading cannot be matched at all and is absent; a
+ * meal with a before reading but NO after reading IS matched and listed, because
+ * where it started is exactly what was asked and a missing ending does not unask
+ * it. The order is the same total order: distance first, then newer first.
+ */
+export const nearestByStart = (
+  history: readonly MealInstance[],
+  target: number,
+  bound: StartWindow,
+): readonly MealInstance[] =>
+  history
+    .flatMap((meal) => {
+      if (meal.glucoseBefore === null) return [];
+      const distance = Math.abs(meal.glucoseBefore - target);
+      // The bound is a tolerance: outside it the meal is not listed at all.
+      return distance > bound ? [] : [{ meal, distance }];
+    })
+    .sort(nearestFirst)
+    .map((nearest) => nearest.meal);
+
+/**
+ * One result of a start lookup. Its change is shown when the meal has both
+ * readings and omitted entirely when it does not, exactly as everywhere else: a
+ * measurement nobody took must never be drawn as a change of zero.
+ */
+const startResultOf = (meal: MealInstance, target: number): NearestResult => {
+  // Only meals with a before reading reach here, so the reading is a number.
+  const before = meal.glucoseBefore as number;
+  const change = meal.glucoseAfter === null ? null : meal.glucoseAfter - before;
+  return {
+    id: meal.id,
+    date: lookupDateText(meal.eatenOn),
+    slot: slotLabel(meal.slot),
+    dose: doseText(meal.insulinUnits),
+    foods: foodsText(meal.foods),
+    before: String(before),
+    after: meal.glucoseAfter === null ? null : String(meal.glucoseAfter),
+    change: change === null ? null : { text: changeText(change), band: changeBand(change) },
+    openLabel: `View ${meal.slot} on ${lookupDateText(meal.eatenOn)}`,
+    distance: distanceText(Math.abs(before - target)),
+  };
+};
+
+/** What the results area says with no starting reading entered. */
+export const START_INVITATION = 'Enter a starting reading to find the meals nearest to it.';
+
+/**
+ * What it says when the window admits nothing. It names the WINDOW rather than
+ * the reading, because widening the window is the move that finds something.
+ */
+export const NO_START_MATCHES = 'No meals within that window.';
+
+export const startView = (
+  history: readonly MealInstance[],
+  typed: string,
+  bound: StartWindow,
+): NearestView => {
+  const target = parseStartTarget(typed);
+  // With no reading the screen invites one rather than listing everything.
+  if (target === null) return { kind: 'inviting', message: START_INVITATION };
+
+  const meals = nearestByStart(history, target, bound);
+  if (meals.length === 0) return { kind: 'none', message: NO_START_MATCHES };
+  return { kind: 'found', results: meals.map((meal) => startResultOf(meal, target)) };
 };

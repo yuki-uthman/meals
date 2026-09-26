@@ -9,17 +9,34 @@
   --space-4: 1rem;
   --space-5: 1.5rem;
   --radius: 0.75rem;
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
-  /* Light palette */
-  --canvas: #f7f8fa;
-  --surface: #ffffff;
-  --ink: #16191f;
-  --ink-muted: #5b6270;
-  --line: #dfe3ea;
-  --accent: #2f6f4f;
+  /* The canvas's two typefaces. Each names its fallback, so the app is fully
+     usable before the webfonts arrive and if they never do. */
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+
+  /* Light palette, from the canvas design reference. */
+  --canvas: #f6f3ec; /* ground      */
+  --surface: #ffffff; /* card        */
+  --ink: #1c1a17;
+  --ink-muted: #625d53;
+  --line: #e3ddd0; /* hairline    */
+  --wash: #f0ece3;
+  --dashed-edge: #c9c2b3;
+
+  /* Two accents, deliberately, because one token cannot carry both jobs. The
+     FILL is the deep teal in both schemes, as the canvas note says, so a white
+     label stays readable on it. The accent proper is the one that lifts in the
+     dark, and it is only ever used as text, an icon or a border -- never behind
+     white text. */
+  --accent-fill: #1f6f63;
+  --accent-fill-hover: #175247;
   --accent-ink: #ffffff;
-  --danger: #a3302a;
+  --accent: #1f6f63;
+  --accent-hover: #175247;
+  --accent-wash: #e4efec;
+
+  --danger: #b42318;
 
   /* Band colours from the canvas. They are deliberately the same in both
      palettes, so the two themes read identically: a band is a statement about
@@ -36,16 +53,24 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #12151a;
-    --surface: #1b1f26;
-    --ink: #eef1f5;
-    --ink-muted: #a2aab8;
-    --line: #2c323c;
-    --accent: #6fbf95;
-    --accent-ink: #10231a;
-    --danger: #f0938d;
+    --canvas: #141311; /* ground   */
+    --surface: #1f1d1a; /* card     */
+    --ink: #f3efe7;
+    --ink-muted: #a39c8f;
+    --line: #332f2a; /* hairline */
+    --wash: #2a2723;
+    --dashed-edge: #4a453d;
+
+    /* The FILL does not move: a filled button keeps the deep teal in the dark
+       too, so its white label stays readable. Only the text accent lifts. */
+    --accent: #6fcbba;
+    --accent-hover: #8fd8c8;
+    --accent-wash: #1e2e2b;
+
+    --danger: #e88c82;
     /* No band token is overridden here, on purpose: the canvas keeps the band
-       colours unchanged between light and dark so the two themes read the same. */
+       colours unchanged between light and dark so the two themes read the same.
+       A band states what happened, and it must not change its mind in the dark. */
   }
 }
 
@@ -68,10 +93,40 @@ body {
 body {
   background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font);
+  font-family: var(--font-body);
+  font-weight: 400;
   font-size: 1rem;
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
+}
+
+/* Headings, and the large numerals, are set in the canvas's display face at 500.
+   The fallback rides in the token, so a heading is a heading before Fraunces
+   arrives and if it never does. */
+h1,
+h2,
+h3,
+h4,
+.expected-after__line,
+.figure__value {
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+
+/* The small furniture labels are NOT headings to the eye, whatever tag carries
+   them: a slot name, a column head or a section caption reads as part of the
+   interface, so it stays in the body face at the weight it already had. */
+.shell__weekday,
+.card__slot,
+.detail__slot,
+.instances__heading,
+.form__heading,
+.expected-after__label,
+.figure__name,
+.history__corner,
+.history__header,
+.result__when {
+  font-family: var(--font-body);
 }
 
 #app {
@@ -136,11 +191,22 @@ label {
   padding: var(--space-3) var(--space-4);
   border: none;
   border-radius: var(--radius);
-  background: var(--accent);
+  /* The deep teal in BOTH schemes: this is the one place a white label sits on
+     the accent, so the accent under it must not lift in the dark. */
+  background: var(--accent-fill);
   color: var(--accent-ink);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+}
+
+.button:hover:not([disabled]) {
+  background: var(--accent-fill-hover);
+}
+
+.button--quiet:hover:not([disabled]) {
+  background: var(--accent-wash);
+  color: var(--accent-hover);
 }
 
 .button[disabled] {
@@ -572,7 +638,7 @@ label {
   margin-left: auto;
   padding: 0 var(--space-2);
   border-radius: var(--radius);
-  background: var(--canvas);
+  background: var(--accent-wash);
   color: var(--accent);
   font-size: 0.8125rem;
 }
@@ -641,7 +707,9 @@ label {
 
 .segmented__radio {
   margin: 0;
-  accent-color: var(--accent);
+  /* The browser draws a white mark inside this fill, so it takes the fill that
+     does not lift rather than the text accent. */
+  accent-color: var(--accent-fill);
 }
 
 /* The expected-after panel, beside the after reading field. It is drawn as a quiet
@@ -676,7 +744,9 @@ label {
 /* The number carries the band of the change it was built from, and the colour is
    bound to the published band name rather than written into the markup. */
 .expected-after__value {
-  font-weight: 600;
+  /* It sits in the display face with the rest of its line; the band colour is
+     what sets it apart, not a weight the face was never drawn at. */
+  font-weight: 500;
 }
 
 /* The occasion the estimate came from. It wraps at 360 px instead of widening. */
@@ -815,7 +885,7 @@ label {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--canvas);
+  background: var(--wash);
   color: var(--ink);
   font: inherit;
   font-size: 0.9375rem;
@@ -836,7 +906,7 @@ label {
   padding: var(--space-3) 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--canvas);
+  background: var(--wash);
   color: var(--ink);
   font: inherit;
   font-size: 1.25rem;
@@ -855,15 +925,15 @@ label {
   padding: var(--space-3) 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--canvas);
+  background: var(--wash);
   color: var(--ink);
   font: inherit;
   cursor: pointer;
 }
 
 .number-pad__action--done {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--accent-ink);
   font-weight: 600;
 }
@@ -889,7 +959,7 @@ label {
   width: 3rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--canvas);
+  background: var(--wash);
   color: var(--ink);
   font: inherit;
   font-size: 1.25rem;
@@ -948,8 +1018,8 @@ label {
 
 .history__view--on,
 .history__period--on {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--accent-ink);
   font-weight: 600;
 }
@@ -1001,7 +1071,7 @@ label {
   content: '';
   display: block;
   height: 2rem;
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--dashed-edge);
   border-radius: var(--space-1);
 }
 
@@ -1145,8 +1215,8 @@ label {
 }
 
 .lookup__tab--on {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--accent-ink);
   font-weight: 600;
 }
@@ -1221,7 +1291,10 @@ label {
 .figure__value {
   margin: 0;
   font-size: 1.25rem;
-  font-weight: 600;
+  /* A large numeral is set in the display face, which the canvas carries at 500
+     and at 500 only: asking for 600 here would have the browser synthesise a
+     weight that was never drawn. */
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1319,9 +1392,13 @@ label {
   font-weight: 600;
 }
 
-/* ----------------------------------------------------- lookup by change */
+/* -------------------------------------------- lookup by change, by start */
 
-.lookup__by-change {
+/* By change and By start are the same shape: a field, its window chips, and the
+   results below. Both are fluid columns, so neither can push the document sideways
+   at 360 px. */
+.lookup__by-change,
+.lookup__by-start {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -1354,8 +1431,8 @@ label {
 /* The chosen window. The fill says it to the eye; aria-pressed says it to everyone
    else, so the choice is never carried by colour alone. */
 .lookup__window--on {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--accent-ink);
   font-weight: 600;
 }

@@ -8,8 +8,12 @@ import {
 import {
   changeWindowLabel,
   nearestView,
+  startView,
+  startWindowLabel,
   CHANGE_WINDOWS,
+  START_WINDOWS,
   type ChangeWindow,
+  type StartWindow,
 } from '../domain/nearest-lookup';
 import type { MealInstance } from '../domain/meal-identity';
 
@@ -17,12 +21,12 @@ import type { MealInstance } from '../domain/meal-identity';
 // matched, and those meals listed newest first, each one a way into its detail.
 //
 // The screen carries three tabs, because the canvas makes By food, By change and
-// By start one screen and a person moves between them. By food and By change both
-// work; By start is present but refused rather than pretending to work, so nobody
-// taps it and is told nothing.
+// By start one screen and a person moves between them. All three work now.
 //
-// By change asks for a signed target and a window. The window is a TOLERANCE, not
-// a ranking: what it excludes is absent rather than listed last. Which meals it
+// By change asks for a signed target and a window; By start asks for an unsigned
+// starting reading and a window of its own, ±5, ±10 or ±20, because a tolerance on
+// a reading is a coarser thing than one on a change. Either window is a TOLERANCE,
+// not a ranking: what it excludes is absent rather than listed last. Which meals it
 // admits, how far off each was and what order they come in are the domain's rules;
 // this only draws them, and a result is the SAME card a food lookup result is.
 //
@@ -49,6 +53,13 @@ export const LOOKUP_SEARCH_LABEL = 'Search past meals';
  */
 export const LOOKUP_TARGET_LABEL = 'Change wanted';
 
+/**
+ * The starting reading field's real name, drawn beside the field. It says 'reading'
+ * outright, because what is asked for here is where a meal BEGAN and not how far it
+ * moved, and it carries no sign: a reading is never negative.
+ */
+export const LOOKUP_START_LABEL = 'Starting reading';
+
 /** Which way of looking back the person is on. */
 export type LookupTab = 'food' | 'change' | 'start';
 
@@ -60,7 +71,7 @@ const TABS: readonly {
 }[] = [
   { tab: 'food', label: 'By food', ready: true },
   { tab: 'change', label: 'By change', ready: true },
-  { tab: 'start', label: 'By start', ready: false },
+  { tab: 'start', label: 'By start', ready: true },
 ];
 
 /**
@@ -82,6 +93,14 @@ export type LookupScreenView = {
   /** The target change as typed, signed, and the window it is asked within. */
   readonly target: string;
   readonly window: ChangeWindow;
+  /**
+   * The starting reading as typed, unsigned, and the window it is asked within.
+   * Held separately from By change's pair, because they are different questions
+   * over different quantities and switching tabs must not answer one with the
+   * other's target or the other's tolerance.
+   */
+  readonly startTarget: string;
+  readonly startWindow: StartWindow;
   readonly state: LookupState;
 };
 
@@ -93,6 +112,9 @@ export type LookupHandlers = {
   /** Choosing a tab or a window IS structural, so both redraw. */
   readonly onTab: (tab: LookupTab) => void;
   readonly onWindow: (bound: ChangeWindow) => void;
+  /** The starting reading, recorded without a redraw for the same reason. */
+  readonly onStartTarget: (target: string) => void;
+  readonly onStartWindow: (bound: StartWindow) => void;
   readonly onOpen: (id: string) => void;
   readonly onRetry: () => void;
 };
@@ -281,19 +303,24 @@ const changePanelFor = (
  * nothing in the window, widening it is the move that finds something, so the chips
  * must stay usable exactly when there are no results.
  */
-const windowChips = (chosen: ChangeWindow, handlers: LookupHandlers): HTMLElement => {
+const windowChips = <Bound extends number>(
+  bounds: readonly Bound[],
+  chosen: Bound,
+  label: (bound: Bound) => string,
+  choose: (bound: Bound) => void,
+): HTMLElement => {
   const chips = element('div', 'lookup__windows');
   chips.setAttribute('role', 'group');
   chips.setAttribute('aria-label', 'Window');
 
-  for (const bound of CHANGE_WINDOWS) {
+  for (const bound of bounds) {
     const on = bound === chosen;
     const chip = document.createElement('button');
     chip.className = on ? 'lookup__window lookup__window--on' : 'lookup__window';
     chip.type = 'button';
-    chip.textContent = changeWindowLabel(bound);
+    chip.textContent = label(bound);
     chip.setAttribute('aria-pressed', String(on));
-    chip.addEventListener('click', () => handlers.onWindow(bound));
+    chip.addEventListener('click', () => choose(bound));
     chips.append(chip);
   }
 
@@ -328,7 +355,10 @@ const byChangeSection = (
 
   const asked = element('div', 'field');
   asked.append(label, field);
-  section.append(asked, windowChips(view.window, handlers));
+  section.append(
+    asked,
+    windowChips(CHANGE_WINDOWS, view.window, changeWindowLabel, handlers.onWindow),
+  );
 
   const panel = element('div', 'lookup__panel');
   panel.append(...changePanelFor(meals, view.target, view.window, handlers));
@@ -342,6 +372,67 @@ const byChangeSection = (
     const typed = field.value;
     handlers.onTarget(typed);
     panel.replaceChildren(...changePanelFor(meals, typed, view.window, handlers));
+  });
+
+  return section;
+};
+
+/** Everything below the starting reading field, for the reading and window in hand. */
+const startPanelFor = (
+  meals: readonly MealInstance[],
+  target: string,
+  bound: StartWindow,
+  handlers: LookupHandlers,
+): readonly HTMLElement[] => {
+  const view = startView(meals, target, bound);
+  if (view.kind !== 'found') return [resultsMessage(view.message)];
+  return [resultsSection(view.results, handlers)];
+};
+
+/**
+ * By start: the starting reading, its own window, and the meals that began nearest
+ * to it. Only this panel is redrawn as the reading is typed, for the same reason
+ * the search box's and By change's are.
+ */
+const byStartSection = (
+  meals: readonly MealInstance[],
+  view: LookupScreenView,
+  handlers: LookupHandlers,
+): HTMLElement => {
+  const section = element('div', 'lookup__by-start');
+
+  const field = document.createElement('input');
+  field.className = 'field__input lookup__field';
+  field.id = 'lookup-start-target';
+  // A text field with a numeric keypad rather than a number field: the reading is
+  // unsigned whole mg/dL, and the domain is the only thing that decides what counts
+  // as one, so nothing here silently repairs what was typed.
+  field.type = 'text';
+  field.inputMode = 'numeric';
+  field.autocomplete = 'off';
+  field.value = view.startTarget;
+
+  const label = document.createElement('label');
+  label.className = 'field__label';
+  label.setAttribute('for', field.id);
+  label.textContent = LOOKUP_START_LABEL;
+
+  const asked = element('div', 'field');
+  asked.append(label, field);
+  section.append(
+    asked,
+    windowChips(START_WINDOWS, view.startWindow, startWindowLabel, handlers.onStartWindow),
+  );
+
+  const panel = element('div', 'lookup__panel');
+  panel.append(...startPanelFor(meals, view.startTarget, view.startWindow, handlers));
+  section.append(panel);
+
+  // Typing redraws THIS PANEL and nothing else, for the reason By change's does.
+  field.addEventListener('input', () => {
+    const typed = field.value;
+    handlers.onStartTarget(typed);
+    panel.replaceChildren(...startPanelFor(meals, typed, view.startWindow, handlers));
   });
 
   return section;
@@ -371,6 +462,11 @@ export const lookupScreen = (
 
   if (view.tab === 'change') {
     screen.append(byChangeSection(view.state.meals, view, handlers));
+    return screen;
+  }
+
+  if (view.tab === 'start') {
+    screen.append(byStartSection(view.state.meals, view, handlers));
     return screen;
   }
 

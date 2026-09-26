@@ -70,7 +70,12 @@ import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from '
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { historyScreen, type HistoryState } from './ui/history';
 import { lookupScreen, type LookupState, type LookupTab } from './ui/lookup';
-import { DEFAULT_CHANGE_WINDOW, type ChangeWindow } from './domain/nearest-lookup';
+import {
+  DEFAULT_CHANGE_WINDOW,
+  DEFAULT_START_WINDOW,
+  type ChangeWindow,
+  type StartWindow,
+} from './domain/nearest-lookup';
 import { shell, type ShellHandlers, type ShellTab } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
 
@@ -120,6 +125,15 @@ const start = (): void => {
   let lookupTab: LookupTab = 'food';
   let lookupTarget = '';
   let lookupWindow: ChangeWindow = DEFAULT_CHANGE_WINDOW;
+  /**
+   * What By start is asking: the unsigned starting reading as typed and its own
+   * window, which starts at plus or minus 10. They are held apart from By change's
+   * pair because they are different questions over different quantities -- a
+   * tolerance on a reading is coarser than one on a change -- so neither tab may
+   * ever answer with the other's target or the other's slack.
+   */
+  let lookupStartTarget = '';
+  let lookupStartWindow: StartWindow = DEFAULT_START_WINDOW;
   /** Guards against a slow read from an earlier account landing on a later one. */
   let lookupToken = 0;
 
@@ -375,6 +389,8 @@ const start = (): void => {
           query: lookupQuery,
           target: lookupTarget,
           window: lookupWindow,
+          startTarget: lookupStartTarget,
+          startWindow: lookupStartWindow,
           state: lookupSectionState(),
         },
         {
@@ -398,6 +414,15 @@ const start = (): void => {
           },
           onWindow: (bound) => {
             lookupWindow = bound;
+            render();
+          },
+          // The starting reading is recorded and not re-rendered, for exactly the
+          // reason the change target is; its window is structural and redraws.
+          onStartTarget: (target) => {
+            lookupStartTarget = target;
+          },
+          onStartWindow: (bound) => {
+            lookupStartWindow = bound;
             render();
           },
           onOpen: (id) => void openMealDetail(id),
@@ -551,6 +576,8 @@ const start = (): void => {
     lookupTab = 'food';
     lookupTarget = '';
     lookupWindow = DEFAULT_CHANGE_WINDOW;
+    lookupStartTarget = '';
+    lookupStartWindow = DEFAULT_START_WINDOW;
     lookupMeals = null;
     lookupMessage = null;
     if (!(await loadLookup())) return;
@@ -985,6 +1012,8 @@ const start = (): void => {
     lookupTab = 'food';
     lookupTarget = '';
     lookupWindow = DEFAULT_CHANGE_WINDOW;
+    lookupStartTarget = '';
+    lookupStartWindow = DEFAULT_START_WINDOW;
     signInState = { ...emptySignInState, message };
     render();
   };
@@ -1062,6 +1091,8 @@ const start = (): void => {
     lookupTab = 'food';
     lookupTarget = '';
     lookupWindow = DEFAULT_CHANGE_WINDOW;
+    lookupStartTarget = '';
+    lookupStartWindow = DEFAULT_START_WINDOW;
     if (account === null) {
       render();
       return;
