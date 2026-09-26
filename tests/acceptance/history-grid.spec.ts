@@ -574,12 +574,13 @@ test('the grid opens on Before: one row per day, four chronological columns, col
 }) => {
   const phone = await openHistory(browser, accounts.owner);
 
-  // The navigation carries exactly Today and History. Lookup arrives at value 10 and
-  // Settings is in no value, so neither may be here yet.
+  // The navigation carries Today and History, which is what this value is judged on. Lookup
+  // joins them at value 10, exactly as this value's own design announced, so its presence is
+  // no longer denied here; Settings is in no value and is still not built. The observation
+  // this oracle protects -- that History is reachable and shows the grid -- is unchanged.
   const navText = await textOf(navigation(phone));
   expect(navText, 'the navigation carries Today').toMatch(/today/i);
   expect(navText, 'the navigation carries History').toMatch(/history/i);
-  expect(navText, 'Lookup is not in this value').not.toMatch(/lookup/i);
   expect(navText, 'Settings is in no value and is not built').not.toMatch(/settings/i);
 
   // The default period is two weeks, which is fourteen dates ending with today.
