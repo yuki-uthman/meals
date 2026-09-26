@@ -60,16 +60,46 @@ export const foodText = (food: FoodPortion): string => {
   return `${food.name} ${measure}`;
 };
 
+/** '5 u', or nothing at all when no dose was recorded. The app never suggests one. */
+export const doseText = (units: number | null): string | null =>
+  units === null ? null : `${amountText(units)} u`;
+
 /**
- * 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml'. A meal with no recorded foods
- * keeps its slot and time and drops the trailing segment rather than showing an
- * empty one.
+ * '104 → 186 mg/dL' when both readings exist, '104 mg/dL before' or
+ * '186 mg/dL after' when only one does, and nothing when neither does. Whole
+ * mg/dL numbers, as stored.
  */
-export const mealLine = (meal: Meal): string => {
-  const head = `${slotLabel(meal.slot)} · ${clockTime(meal.eatenAt)}`;
-  if (meal.foods.length === 0) return head;
-  return `${head} · ${meal.foods.map(foodText).join(', ')}`;
+export const glucoseText = (meal: Meal): string | null => {
+  const before = meal.glucoseBefore;
+  const after = meal.glucoseAfter;
+  if (before !== null && after !== null) return `${amountText(before)} → ${amountText(after)} mg/dL`;
+  if (before !== null) return `${amountText(before)} mg/dL before`;
+  if (after !== null) return `${amountText(after)} mg/dL after`;
+  return null;
 };
+
+/**
+ * Everything on a meal's line that the account itself recorded: the clock time,
+ * the foods with their amounts, the dose and the glucose readings. The slot
+ * label is deliberately absent, because it is the same for every account and so
+ * belongs to the screen rather than to anybody's data.
+ *
+ * '07:40 · Oats 60 g, Milk 200 ml · 5 u · 104 → 186 mg/dL'. A segment with
+ * nothing recorded in it is dropped rather than shown empty.
+ */
+export const mealRecordedText = (meal: Meal): string => {
+  const foods = meal.foods.length === 0 ? null : meal.foods.map(foodText).join(', ');
+  const segments = [clockTime(meal.eatenAt), foods, doseText(meal.insulinUnits), glucoseText(meal)];
+  return segments.filter((segment): segment is string => segment !== null).join(' · ');
+};
+
+/**
+ * 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml · 5 u · 104 → 186 mg/dL'. The
+ * whole line as one string, slot label included, for readers that want the text
+ * without the furniture boundary.
+ */
+export const mealLine = (meal: Meal): string =>
+  `${slotLabel(meal.slot)} · ${mealRecordedText(meal)}`;
 
 /** '18 u at 22:30', or '18 u' when no time was recorded. */
 export const nightInsulinLine = (night: NightInsulin): string => {
@@ -79,13 +109,34 @@ export const nightInsulinLine = (night: NightInsulin): string => {
 
 const byTime = (a: Meal, b: Meal): number => a.eatenAt.getTime() - b.eatenAt.getTime();
 
+/**
+ * One line of the day log, split where ownership is: `furniture` is the part
+ * that reads the same for every account, `recorded` is the part that exists only
+ * because this account wrote it down. The reading surface marks the second as
+ * entry data and the first as nothing of the kind.
+ */
+export type DayLogEntry = {
+  readonly furniture: string | null;
+  readonly recorded: string;
+};
+
 /** Every line the day log shows, meals in clock order then the night dose. */
-export const dayLogLines = (log: DayLog): readonly string[] => [
-  ...[...log.meals].sort(byTime).map(mealLine),
-  ...log.nightInsulin.map(nightInsulinLine),
+export const dayLogEntries = (log: DayLog): readonly DayLogEntry[] => [
+  ...[...log.meals]
+    .sort(byTime)
+    .map((meal): DayLogEntry => ({ furniture: slotLabel(meal.slot), recorded: mealRecordedText(meal) })),
+  ...log.nightInsulin.map(
+    (night): DayLogEntry => ({ furniture: null, recorded: nightInsulinLine(night) }),
+  ),
 ];
 
-export const isEmpty = (log: DayLog): boolean => dayLogLines(log).length === 0;
+/** The same lines as plain text, furniture joined back on. */
+export const dayLogLines = (log: DayLog): readonly string[] =>
+  dayLogEntries(log).map((entry) =>
+    entry.furniture === null ? entry.recorded : `${entry.furniture} · ${entry.recorded}`,
+  );
+
+export const isEmpty = (log: DayLog): boolean => dayLogEntries(log).length === 0;
 
 export const emptyDayLog = (date: IsoDate): DayLog => ({ date, meals: [], nightInsulin: [] });
 
