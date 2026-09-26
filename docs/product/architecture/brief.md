@@ -577,3 +577,84 @@ Oracle target locator: `tests/acceptance/meal-detail.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/meal-detail.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 7: logging the same foods again
+
+### Purpose
+From a meal, start a fresh entry with only its foods and amounts copied, so the same composition can be compared across days without retyping it, and saving leaves the original exactly as it was.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read or a write.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- The app never recommends a dose.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/meal-draft.ts` | EXTEND | A draft seeded from an existing meal: its foods and amounts copied, everything else fresh. |
+| `src/ui/meal-detail.ts` | EXTEND | The 'Log again with these foods' control and the sentence saying what it does. |
+| `src/ui/meal-form.ts` | EXTEND | The subtitle naming the meal the foods came from, so a person cannot lose track of what they are repeating. |
+| `src/ui/theme.css` | EXTEND | The copied-food row and the subtitle, in both palettes. |
+| `src/main.ts` | EXTEND | Route from a meal into a fresh entry seeded from it, and back to Today after the save. |
+| `tests/acceptance/log-again.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- 'Log again with these foods' copies the foods only: each food's name, its type and its amount with its unit. The type travels with the food because a food row cannot exist without one and the type is a property of that food rather than of the occasion.
+- The DOSE STARTS EMPTY. The canvas pre-fills it with the dose taken last time, and this design deliberately does not. A dose offered as a starting value is a dose recommended, however it is labelled, and the brief says outright that the app never recommends one. Value 8 will show what happened last time at a dose the person has chosen, which reports rather than proposes.
+- The glucose readings, the note and the after reading also start empty, and the exercise context starts at None. The time starts at the current local clock time.
+- The slot starts at the source meal's slot. A slot is not a reading, a dose, a time or a context, and repeating a dinner almost always means another dinner; the person can still change it, and value 8 depends on the slot being a deliberate choice.
+- A repeat is recorded against TODAY's local date, whichever date the person browsed to find the source meal. Repeating a meal is something done when eating it again, so the entry belongs to the day it is made on. Saving returns to Today for today.
+- Saving creates a new meal and touches nothing on the source. The source keeps its own readings, dose, context and note, and the repeat is a separate row, because the entire premise of the product is comparing two instances of the same composition.
+- The form names its source: 'same foods as Thu 10 Sep · Dinner' under the heading. A copied food's amount is editable, and changing it makes the entry a different meal by the identity rule of value 6, which is correct and needs no warning.
+- Value 8's expected-after estimate is not built here. This value copies foods and records a separate entry; the estimate is the next value.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| mealDraft | `src/domain/meal-draft.ts:1` | EXTEND | A seeded draft is the same draft with its foods already in it, not a second kind of draft. |
+| mealForm | `src/ui/meal-form.ts:1` | EXTEND | One recording screen. A separate 'repeat' screen would drift from the one that records everything else. |
+| saveMeal | `src/ports/log-store.ts:41` | REUSE | A repeat is an ordinary new meal; the write path does not change. |
+| sameFoodsKey | `src/domain/meal-identity.ts:1` | REUSE | The instance list must recognise the repeat as the same meal, which is exactly value 6's rule and must not be restated. |
+| localToday | `src/domain/entry.ts:144` | REUSE | The date a repeat lands on is the local today the rest of the app already computes. |
+
+### Prefactoring
+Not applicable: The seams are already in place: the meal form takes a draft, the draft has a shape, the write path takes a recording, and the identity rule is factored out. This value seeds a draft and adds one control.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The meal form and its labelled fields | producer | `src/ui/meal-form.ts:1` | UNCHANGED_COMPATIBLE | The same screen with the same labels gains a subtitle and arrives with foods already in the draft. No field changes name or behaviour. |
+| The meal identity rule as the consumer that must pair the repeat with its source | consumer | `src/domain/meal-identity.ts:1` | UNCHANGED_COMPATIBLE | Copying name, amount and unit exactly is what makes the repeat the same meal under the existing rule; nothing about the rule moves. |
+
+### Boundaries
+- Driving port: A person eating something they have eaten before: open that meal, start a fresh entry from its foods, enter today's reading, dose and context, and save it as its own record.
+- Driven port: The log-store port for reading the source meal and writing the new one.
+- Driven port: The identity port, unchanged, for the session the write runs as.
+- Dependency direction: Seeding a draft from a meal is a pure function in src/domain. The screen is unchanged in kind: a pure function of a draft plus handlers.
+- Failure: Condition: The save fails after the foods were copied. | Outcome: Retry | Observation: The screen keeps every copied food and every value entered, shows 'Cannot reach the server. Try again.', and the source meal is untouched.
+- Failure: Condition: Every copied food is removed before saving. | Outcome: Refusal | Observation: Saving is refused with 'Add at least one food.', exactly as a meal recorded from scratch is, because an entry with no foods cannot be compared with anything.
+- Failure: Condition: The source meal has been deleted or hidden by row-level security between opening it and repeating it. | Outcome: Refusal | Observation: The screen shows 'That meal is not here.' and offers a way back to Today rather than a form seeded from nothing.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: From a meal, 'Log again' opens a new entry with only the foods and amounts copied; time, readings, dose and context start empty or at today's values, and saving creates a separate record while the original is unchanged.
+
+Stimulus: Account A owns one dinner dated yesterday in local terms at 19:05: Chicken rice of type Mixed dish 250 g and Cucumber salad of type Vegetable 80 g, glucose before 110, glucose after 142, 6 units, exercise context 'After meal' and the note 'Ate slowly'. A browser at a 360 px viewport signs in, steps back one day, opens that dinner's card body, and uses 'Log again with these foods'. It reads the form as it arrives, then enters glucose before 145 and 7 units and saves.
+
+Expected: The form arrives titled for a new meal, naming its source as the same foods as yesterday's Dinner. It holds Chicken rice 'Mixed dish' 250 g and Cucumber salad 'Vegetable' 80 g. The slot is Dinner. Glucose before, the dose, the note and glucose after are all EMPTY, the exercise context is None, and the time is not 19:05. After saving, Today for TODAY shows a Dinner card with 'Chicken rice 250 g · Cucumber salad 80 g', '145' and '7 u' and no change. Stepping back one day still shows yesterday's Dinner with '110', '142', '+32' and '6 u', its note and context unchanged. Opening either meal lists 'Every time you ate this · 2'. The page never scrolls horizontally.
+
+Falsifier: A food, type, amount or unit is not copied, or anything besides the foods is carried over -- in particular a pre-filled dose, reading, note or the source's time -- or the exercise context does not start at None, or the new entry lands on yesterday instead of today, or the source meal's own values change in any way, or saving updates the source instead of creating a second record, or the two are not recognised as the same meal, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/log-again.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/log-again.spec.ts`
+Verification command: `npm run test:acceptance`
