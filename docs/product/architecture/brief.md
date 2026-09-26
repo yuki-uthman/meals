@@ -843,3 +843,89 @@ Oracle target locator: `tests/acceptance/history-grid.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/history-grid.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 10: lookup by food
+
+### Purpose
+Type a food and see every past meal that contained it, with the typical amount, the typical dose and the average change, so 'last time I ate this, how much did I take and how far did it go up?' is answered in one screen.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read; a lookup may never reach another account's meals.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Glucose is whole numbers in mg/dL.
+- The app never recommends a dose. A typical dose is a report of what was taken before, never a proposal.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/food-lookup.ts` | CREATE_NEW | The match, the summary figures and the result order, as pure functions, because every number on the screen is arithmetic that must be checkable without a browser. |
+| `src/ui/lookup.ts` | CREATE_NEW | The Lookup screen: the three tabs, the search field, the summary and the results. |
+| `src/ui/shell.ts` | EXTEND | The bottom navigation gains Lookup, which value 9 said would arrive here. |
+| `src/ui/theme.css` | EXTEND | Search field, tab, summary and result card tokens in both palettes. |
+| `src/main.ts` | EXTEND | Route to Lookup, hold the query, and open a result's meal. |
+| `tests/acceptance/lookup-by-food.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- A meal matches when any of its foods has a name CONTAINING the typed text, compared trimmed and case-insensitively. 'rice' finds 'Chicken rice', because a person searching their own log types a fragment, not an exact name.
+- Results are past meals, newest first by date then clock time. The observation does not order them, and newest first is what the rest of the app means by a list of instances.
+- Each result reads as the date and slot, the dose, the meal's foods with amounts, and the two readings with the banded change: 'Thu 10 Sep · Dinner', '6 u', 'Chicken rice 250 g · Cucumber salad 80 g', '110', '142', '+32'. A meal with no after reading shows its before alone and no change.
+- Three summary figures, over the matching meals only. TYPICAL AMOUNT is the median of the matched food's own amounts, reported with its unit; where the matched food appears with more than one unit the summary reports the median within the commonest unit and says which. TYPICAL DOSE is the median of the doses of the matching meals that recorded one. AVERAGE CHANGE is the arithmetic mean of the changes of the matching meals that have BOTH readings, rounded to the nearest whole number, halves away from zero, and written with its sign.
+- Median is defined outright so the oracle can check it: the middle value of the sorted list when the count is odd, and the mean of the two middle values rounded to the nearest whole number, halves away from zero, when it is even.
+- A meal with no after reading still appears in the results, because it is a meal that contained the food, but it contributes nothing to the average change. A meal with no dose contributes nothing to the typical dose. Each figure says how many meals it is over, so a figure over two meals cannot be mistaken for one over twenty.
+- The summary names the food and the number of matching meals: 'Chicken rice · 6 meals'. With no matching meals there is no summary and the results area says 'No meals with that food yet.'; with an empty search box the screen invites a search instead of listing everything.
+- Each result opens that meal's detail, by id through the port, exactly as a Today card and a History cell do.
+- The screen carries three tabs, 'By food', 'By change' and 'By start', because the canvas makes them one screen and a person moves between them. Only By food works in this value; the other two arrive in values 11 and 12 and until then they are present but not yet selectable, rather than pretending to work.
+- The search field has a real label, 'Search past meals', which is visually hidden because the field sits behind a search icon in the canvas. Hidden is not absent: it is what the field is called to anyone not looking at it.
+- The canvas's extra chips -- 'All meals', 'Dinner only', '~250 g' -- and its 'since July' and prose sentence are not built. The observation names a summary of three figures and a list of meals, and filters beyond that are work the brief never asked for.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| mealHistory | `src/ports/log-store.ts:78` | REUSE | The account's meals with their foods are already read this way for the instance list and the estimate; a lookup must not add a third read of the same thing. |
+| changeBand | `src/domain/band.ts:1` | REUSE | A result's change is banded by the one rule. |
+| foodText | `src/domain/entry.ts:57` | REUSE | 'Chicken rice 250 g' already reads this way on every other screen. |
+| doseText | `src/domain/entry.ts:64` | REUSE | '6 u' reads the same everywhere. |
+| shortNightDate | `src/domain/night.ts:204` | REUSE | A result's date reads like a History row's, from the same fixed weekday table. |
+| shell | `src/ui/shell.ts:24` | EXTEND | One frame owns the navigation; Lookup is a third entry in it. |
+| openMealDetail | `src/main.ts:408` | REUSE | A result opens a meal exactly as a card or a cell does, so the three entry points cannot drift. |
+
+### Prefactoring
+Not applicable: The seams exist: the meal history read, the identity and band rules, the shell's navigation slot and the by-id detail read are all already in place. This value adds one screen and one projection.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The bottom navigation as value 9 left it | producer | `src/ui/shell.ts:164` | UNCHANGED_COMPATIBLE | Today and History keep their names and positions; Lookup is added between them as value 9's design said it would be. |
+| The history-grid oracle, which asserts the navigation carries exactly Today and History | consumer | `tests/acceptance/history-grid.spec.ts:361` | INCOMPATIBLE | That oracle was written when Lookup did not exist and states the two entries are the only ones. It must be corrected to admit Lookup, which value 9's own design announced. The observation it protects is unchanged. |
+
+### Boundaries
+- Driving port: A person about to eat something: type its name, see what it usually is and what it usually did, and open the occasion worth looking at.
+- Driven port: The log-store port's meal history.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The match, the summary arithmetic and the ordering are pure functions in src/domain over meals already read. The screen is a pure function of that result.
+- Failure: Condition: The meal history cannot be read because the server is unreachable. | Outcome: Retry | Observation: The screen shows 'Cannot reach the server. Try again.' with a usable retry control, and no summary and no results, rather than an empty list that would read as a food never eaten.
+- Failure: Condition: No meal contains the typed food. | Outcome: Refusal | Observation: There is no summary and the results area says 'No meals with that food yet.', because a summary over nothing would print figures with no meals behind them.
+- Failure: Condition: Matching meals exist but none has both readings. | Outcome: Indeterminate | Observation: The results list them, the typical amount and typical dose are given, and the average change says it is over no meals rather than showing 0, because a change nobody measured is not a change of zero.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: Lookup by food: typing a food lists past meals that contain it, with a summary of typical amount, typical dose and average change, and each result opens the meal.
+
+Stimulus: Account A owns five meals. Two days ago, a dinner with Chicken rice of type Mixed dish 250 g and Cucumber salad of type Vegetable 80 g, 6 units, 110 to 142. Five days ago, a lunch with Chicken rice 220 g and Soup of type Mixed dish 150 ml, 6 units, 103 to 124. Nine days ago, a dinner with Chicken rice 300 g, 5 units, 122 to 178. Twelve days ago, a dinner with Chicken rice 250 g, 8 units and a before reading of 130 and NO after reading. And a breakfast three days ago with Oats of type Carb-heavy 60 g, 4 units, 95 to 150, which contains no rice. A browser at a 360 px viewport signs in, opens Lookup from the navigation, and types 'rice' in the search field. It then types 'quinoa'.
+
+Expected: For 'rice' the summary names Chicken rice over 4 meals. The typical amount is 250 g, the median of 250, 220, 300 and 250 in grams. The typical dose is 6 u, the median of 6, 6, 5 and 8. The average change is +36, the mean of +32, +21 and +56 over the three meals that have both readings, the twelve-day-old meal contributing nothing, and the average says it is over 3 meals. Four results are listed newest first: the two-days-ago dinner with '6 u', '110', '142' and '+32' in rose; the five-days-ago lunch with '6 u', '103', '124' and '+21' in stable; the nine-days-ago dinner with '5 u', '122', '178' and '+56' in rose; and the twelve-days-ago dinner with '8 u' and '130' and no change and no change band. The breakfast with Oats is not listed. Opening the first result shows that meal's detail with 110 and 142. For 'quinoa' there is no summary and the results area reads 'No meals with that food yet.' The page never scrolls horizontally.
+
+Falsifier: A matching meal is missing or a non-matching one is listed, or the results are not newest first, or a summary figure is wrong or does not say how many meals it is over, or a meal with no after reading affects the average change, or a result shows a change it does not have, or a result does not open its meal, or a search with no matches shows a summary or figures, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/lookup-by-food.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/lookup-by-food.spec.ts`
+Verification command: `npm run test:acceptance`
