@@ -750,3 +750,95 @@ Oracle target locator: `tests/acceptance/expected-after.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/expected-after.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 9: the History grid
+
+### Purpose
+Show one row per day and one column per slot, in three views of the same pairs, so a glance says which meals were steady and which were not, and any cell opens the entry behind it.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read; a grid may never contain another account's readings.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward, which a four-column grid on a narrow phone must respect.
+- Glucose is whole numbers in mg/dL.
+- The Before view is coloured by the LEVEL of that reading; the Change and Both views are coloured by the CHANGE. The colour never reflects the absolute level in the Change and Both views.
+- The app never recommends a dose. A colour reports what happened.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `src/domain/history.ts` | CREATE_NEW | The grid projection: a row per day, a cell per column, the value and band each view asks for, as pure functions. |
+| `src/ports/log-store.ts` | EXTEND | Add reading a date range of meals and nights in one go, rather than a day at a time. |
+| `src/adapters/supabase/log-store.ts` | EXTEND | Read that range through PostgREST, still with no user_id of its own. |
+| `src/ui/history.ts` | CREATE_NEW | The History screen: the period chips, the view tabs, the legend, the grid and its caption. |
+| `src/ui/shell.ts` | EXTEND | A bottom navigation, so History is reachable at all. |
+| `src/ui/theme.css` | EXTEND | Grid, cell, tab, chip, legend and navigation tokens in both palettes. |
+| `src/main.ts` | EXTEND | Route to History, hold the chosen period and view, and open a cell's entry. |
+| `tests/acceptance/history-grid.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- One row per calendar date, newest first, and four columns. The first is the night that led INTO that day; the others are breakfast, lunch and dinner. Reading a row left to right is therefore chronological: overnight, then the day's meals.
+- The first column's night is the night record dated the DAY BEFORE the row, and its morning reading is the one value 4 already derives -- the earliest before reading on the row's own date. No second kind of morning reading is invented. Where breakfast is the day's first meal that morning value equals the Breakfast column's Before value, and that redundancy is accepted rather than papered over with a made-up number.
+- The first column's header follows the view, as the canvas has it: 'Bedtime' in Before, 'Overnight' in Change, 'Night' in Both. The brief calls this column the morning; it is the night-and-morning pair, and the header says which half is being shown.
+- Before shows the before reading of each meal and the bedtime reading of the night, coloured by LEVEL. Change shows the signed change of each meal and morning minus bedtime for the night, coloured by CHANGE. Both shows the two readings side by side, coloured by CHANGE. The caption says which: 'Colour is the level of that reading. Tap a cell to open that meal.' or 'Colour is the change, not the level. Tap a cell to open that meal.'
+- The legend follows the view and names its bands in words: the four level bands in Before, the four change bands in Change and Both. A legend that did not switch would tell the reader the wrong thing about the colours in front of them.
+- A cell with nothing behind it is drawn as an empty outline, carries no band and is not tappable. A cell whose meal has no after reading has no change, so it is empty in Change and Both, and shows its before reading in Before: a missing measurement must never be drawn as a change of zero.
+- Tapping a slot cell opens that meal's detail. Tapping a night cell opens the night screen for that night. Every cell that has something behind it is a real control with an accessible name naming its day, its column and its readings, because a coloured square is unreadable to anyone not using the colours.
+- Three periods, as the canvas has them: 2 weeks, 1 month, 3 months, defaulting to 2 weeks. Without a period the grid would be unbounded, and the brief's 'one row per day' needs a range to be one of.
+- The view and the period are published as pressed state on their controls, and each cell publishes data-level-band or data-change-band, so the oracle asserts the rule rather than a colour. The Before view publishes level bands only and the other two change bands only, which is the brief's rule stated where it can be checked.
+- A bottom navigation carries 'Today' and 'History'. Lookup joins it at value 10 and Settings is not in any value and is not built. Without a navigation History cannot be reached, and inventing a third entry point would be work the brief never asked for.
+- At 360 px the four columns plus the day label must fit with no horizontal scrolling. The day label is short ('Tue 22') and a Both cell shows its two numbers in a smaller size, exactly as the canvas does, rather than the grid being allowed to overflow.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| levelBand | `src/domain/band.ts:1` | REUSE | The Before view is the reason the level bands exist; value 4's morning readings already use them. |
+| changeBand | `src/domain/band.ts:1` | REUSE | A Change cell is banded by the same rule as a Today card and an instance row. |
+| LogStore | `src/ports/log-store.ts:71` | EXTEND | A range read belongs beside the single-day read on the one boundary. |
+| slotLabel | `src/domain/entry.ts:47` | REUSE | The column headers name the slots the way every screen does. |
+| shell | `src/ui/shell.ts:24` | EXTEND | One frame gains the navigation, rather than each screen growing its own. |
+| openMealDetail | `src/main.ts:408` | REUSE | A cell opens a meal exactly as a card does, by id through the port, so the two entry points cannot drift. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/today-screen.spec.ts`
+
+Move: Before the grid exists, move the day-log read behind a range read of one day, so History and Today share one way of asking the store for meals and nights, and give the shell its navigation slot.
+
+Preserved observation: The Today screen still shows a card per logged meal, a 'Not logged yet' card per empty slot and the night insulin card, still steps between days, and ownership is still judged on data-entry elements.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| The log-store single-day read | producer | `src/ports/log-store.ts:71` | UNCHANGED_COMPATIBLE | dayLog keeps its signature and outcomes; the range read is added beside it and may share its implementation. |
+| The shell frame as every screen's container | consumer | `src/ui/shell.ts:24` | UNCHANGED_COMPATIBLE | Existing screens keep their headings and controls; a navigation is added below them, and the day stepper and Sign out keep their names. |
+
+### Boundaries
+- Driving port: A person scanning a fortnight: pick a period, switch between the reading, the change and both, see at a glance which meals were steady, and open the one worth looking at.
+- Driven port: The log-store port for a date range of meals and nights.
+- Driven port: The identity port, unchanged, for the session the read runs as.
+- Dependency direction: The grid projection is a pure function in src/domain from meals and nights plus a period and a view to rows of cells. The screen is a pure function of that.
+- Failure: Condition: The range read fails because the server is unreachable. | Outcome: Retry | Observation: The screen shows 'Cannot reach the server. Try again.' with a usable retry control and no grid at all, rather than a grid of empty outlines that would read as a fortnight with nothing logged.
+- Failure: Condition: The chosen period contains no entries. | Outcome: Indeterminate | Observation: The rows are still drawn for each date with every cell an empty outline, and a line says nothing was logged in this period. The dates are real even when the readings are absent, so an empty grid is the honest answer rather than a missing screen.
+- Failure: Condition: A cell is tapped whose meal the account can no longer read. | Outcome: Refusal | Observation: The detail shows 'That meal is not here.' with a way back, by the same rule as every other way of opening a meal.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: History shows one row per day and columns for morning, breakfast, lunch and dinner with a Before, Change and Both view; cells are coloured by the rule in the decisions, the legend follows the view, and tapping a cell opens that meal.
+
+Stimulus: Account A owns, dated two days before today in local terms: a breakfast at 07:40 with 104 to 186, a lunch at 12:55 with 112 to 133, and no dinner. Dated three days before today: a dinner at 19:10 with 260 to 200, and a night record with bedtime glucose 190. Dated four days before today: a breakfast at 08:00 with a before reading of 64 and no after reading. A browser at a 360 px viewport signs in, opens History from the navigation, and reads the grid in the Before view, then the Change view, then the Both view, then taps the breakfast cell of the two-days-ago row.
+
+Expected: The grid has one row per date in the last two weeks, newest first, and columns for the night, Breakfast, Lunch and Dinner. In Before the two-days-ago row shows 104 in the in-range level band for Breakfast and 112 in the in-range band for Lunch, the three-days-ago row shows 260 in the very-high band for Dinner, and the four-days-ago row shows 64 in the low band for Breakfast; the first column of the two-days-ago row shows 190 in the high band, that being the bedtime reading of the night before it; the caption says colour is the level; the legend names the four level bands; and no cell carries a change band. In Change the same cells show +82 in rose-high, +21 in stable and −60 in rose for Dinner, the four-days-ago Breakfast cell is empty because it has no after reading, the caption says colour is the change and not the level, the legend names the four change bands, and no cell carries a level band. Both shows the two readings per cell with the change bands of the Change view. Every dinner cell of the two-days-ago row is an empty outline and is not tappable. Tapping the two-days-ago Breakfast cell opens that meal's detail showing 104 and 186. The page never scrolls horizontally in any of the three views.
+
+Falsifier: A row is missing or the rows are not newest first, or a column is missing or mis-ordered, or a cell holds the wrong reading or change, or a Before cell carries a change band, or a Change or Both cell carries a level band, or a cell with no after reading shows a change, or an empty cell is tappable or carries a band, or the legend or the caption does not change with the view, or tapping a cell does not open that entry, or the document scrolls horizontally at a 360 px viewport in any view.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/history-grid.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/history-grid.spec.ts`
+Verification command: `npm run test:acceptance`
