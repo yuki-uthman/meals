@@ -48,7 +48,7 @@ Reason:     Version one is a personal log for at most two people; anything that 
 -     Lookup by food: typing a food lists past meals that contain it, with a summary of typical amount, typical dose and average change, and each result opens the meal.
 -     Lookup by change: entering a target change and a window (±2, ±5, ±10) lists past meals whose change was nearest, nearest first, each showing dose, before → after and how far off it was.
 -     Lookup by start: entering a starting reading and a window (±5, ±10, ±20) lists past meals whose before reading was nearest, nearest first, each showing dose, before → after, the change and how far off it was.
--     The site follows the device's light or dark setting using the two palettes from the canvas, and every screen fits a 390 px wide phone without horizontal scrolling.
+-     The site follows the device's light or dark setting using the two palettes from the canvas, and every screen fills the width of a large Android phone, with no horizontal scrolling at any viewport width from 360 px upward.
 
 ## Decisions
 -     Glucose is stored and shown in mg/dL as whole numbers.
@@ -63,6 +63,7 @@ Reason:     Version one is a personal log for at most two people; anything that 
 -     Lookups return past meals nearest to the target first; each result shows how far off it was and links to that meal.
 -     Night insulin is a separate daily record (dose, time, bedtime glucose), not a meal.
 -     The app is not a medical device and never suggests a dose.
+-     Layout is fluid, not pinned to the canvas artboard frame. The page fills the phone's width and stays free of horizontal scrolling from 360 px upward; a large Android screen shows more content, not a letterboxed narrow column. The canvas artboards are a visual reference for palette, type and structure, not a target width.
 
 ## Values
 | Observation | Dependencies |
@@ -79,4 +80,4 @@ Reason:     Version one is a personal log for at most two people; anything that 
 | Lookup by food: typing a food lists past meals that contain it, with a summary of typical amount, typical dose and average change, and each result opens the meal. | Opening a meal shows its foods with amounts, dose, before → after with the change, note, and below that every earlier instance with the same foods, newest first, each as dose, before → after and change; the instance being viewed is marked. |
 | Lookup by change: entering a target change and a window (±2, ±5, ±10) lists past meals whose change was nearest, nearest first, each showing dose, before → after and how far off it was. | Opening a meal shows its foods with amounts, dose, before → after with the change, note, and below that every earlier instance with the same foods, newest first, each as dose, before → after and change; the instance being viewed is marked. |
 | Lookup by start: entering a starting reading and a window (±5, ±10, ±20) lists past meals whose before reading was nearest, nearest first, each showing dose, before → after, the change and how far off it was. | Opening a meal shows its foods with amounts, dose, before → after with the change, note, and below that every earlier instance with the same foods, newest first, each as dose, before → after and change; the instance being viewed is marked. |
-| The site follows the device's light or dark setting using the two palettes from the canvas, and every screen fits a 390 px wide phone without horizontal scrolling. | After sign-in the Today screen shows the date, a card per logged meal (slot, time, foods, dose, before → after with the change), a 'not logged yet' card for an empty slot, and a night insulin card. |
+| The site follows the device's light or dark setting using the two palettes from the canvas, and every screen fills the width of a large Android phone, with no horizontal scrolling at any viewport width from 360 px upward. | After sign-in the Today screen shows the date, a card per logged meal (slot, time, foods, dose, before → after with the change), a 'not logged yet' card for an empty slot, and a night insulin card. |
