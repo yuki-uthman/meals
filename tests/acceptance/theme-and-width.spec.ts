@@ -267,6 +267,22 @@ const signIn = async (page: Page, account: Account): Promise<void> => {
   await expect(page.getByRole('heading', { name: /^today$/i }), 'Today is drawn').toBeVisible();
 };
 
+/**
+ * Today's day log has arrived and holds at least one card.
+ *
+ * Opening a screen is asynchronous: the heading is drawn from the bundle, while the cards are drawn
+ * from what Postgres held. A bare count() or a whole-document snapshot taken straight after a
+ * navigation therefore races the fetch, and count() does not retry. This is an auto-retrying
+ * expect(locator), so it waits rather than sampling, and it is awaited anywhere this spec counts
+ * elements or measures a screen after arriving on Today.
+ */
+const dayLogSettled = async (page: Page): Promise<void> => {
+  await expect(
+    page.getByRole('listitem').first(),
+    "Today's day log has arrived and holds a card",
+  ).toBeVisible();
+};
+
 /** A control by name, whatever role it is given: that is a presentation choice. */
 const control = async (page: Locator | Page, name: RegExp): Promise<Locator> => {
   for (const role of ['button', 'link', 'tab', 'radio'] as const) {
@@ -309,6 +325,9 @@ const returnToToday = async (page: Page): Promise<void> => {
     await navigate(page, /^today$/i);
   }
   await expect(today, 'back on Today').toBeVisible();
+  // The heading is drawn before the log is fetched, and every caller either measures this screen or
+  // reaches the next one through one of its cards, so wait for the log rather than racing it.
+  await dayLogSettled(page);
 };
 
 // --- The screens the stimulus lists -----------------------------------------
@@ -449,28 +468,54 @@ const overflowingElement = (page: Page, width: number, tolerance: number): Promi
   );
 
 /**
- * The frame the screens are drawn into. A main landmark is preferred when the app exposes one; the
- * application root that index.html declares is the fallback.
+ * The frame the screens are drawn into, and the identity of whichever box was found, so a failure
+ * can name it. A main landmark is preferred when the app exposes one; the application root that
+ * index.html declares is the fallback. The frame is awaited rather than counted bare: a screen is
+ * opened asynchronously, and `expect(locator)` retries where `count()` does not.
  */
-const contentFrame = async (page: Page): Promise<Locator> => {
+type Frame = { readonly locator: Locator; readonly identity: string };
+
+const contentFrame = async (page: Page): Promise<Frame> => {
   const main = page.getByRole('main');
-  if ((await main.count()) > 0) {
-    return main.first();
+  if (await main.first().isVisible().catch(() => false)) {
+    return { locator: main.first(), identity: "the screen's main region" };
   }
-  return page.locator('#app');
+  const root = page.locator('#app');
+  await expect(root, 'the screen is drawn into a main region or the #app root').toBeVisible();
+  return { locator: root, identity: 'the #app root' };
 };
 
-/** The width of the content itself, inside whatever side gutter the frame keeps. */
-const contentWidth = async (page: Page): Promise<number> =>
-  (await contentFrame(page)).evaluate((node) => {
+/**
+ * The width of the content itself, inside whatever side gutter the frame keeps.
+ *
+ * The box is read with getBoundingClientRect().width, which every rendered element has, rather than
+ * from a computed width that can be 'auto' or empty and parse to NaN. The gutter is subtracted only
+ * where the computed padding is a finite number of pixels, so a missing or non-numeric padding
+ * leaves the measurement whole instead of poisoning it: this function returns a real number or
+ * throws, and never hands a NaN to a comparison that a NaN would make unfalsifiable.
+ */
+const contentWidth = async (page: Page, where: string): Promise<number> => {
+  const frame = await contentFrame(page);
+  const measured = await frame.locator.evaluate((node) => {
     const element = node as HTMLElement;
     const style = getComputedStyle(element);
+    const pixels = (value: string): number => {
+      const parsed = Number.parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
     return (
       element.getBoundingClientRect().width -
-      parseFloat(style.paddingLeft) -
-      parseFloat(style.paddingRight)
+      pixels(style.paddingLeft) -
+      pixels(style.paddingRight)
     );
   });
+  if (!Number.isFinite(measured)) {
+    throw new Error(
+      `${where}: ${frame.identity} gave no measurable width (got ${String(measured)}), so the content width could not be read`,
+    );
+  }
+  return measured;
+};
 
 /**
  * One screen at one width in one scheme: it does not scroll sideways, nothing on it reaches past the
@@ -487,7 +532,7 @@ const expectFillsAndFits = async (page: Page, width: number, where: string): Pro
   ).toBeNull();
 
   const expected = width - 2 * GUTTER;
-  const actual = await contentWidth(page);
+  const actual = await contentWidth(page, where);
   expect(
     Math.abs(actual - expected),
     `${where}: the content spans ${expected} px -- the ${width} px viewport less a ${GUTTER} px gutter each side -- and is not letterboxed into a narrower column (measured ${Math.round(actual)} px)`,
@@ -551,9 +596,16 @@ test('a change band is the same colour in both schemes', async ({ browser }) => 
     const phone = await openPhone(browser, WIDTHS[0], scheme);
     await signIn(phone, accounts.owner);
 
+    // The bands are drawn from the day log, so wait for the log before counting them: a bare
+    // count() straight after signing in samples an empty list and does not retry.
+    await dayLogSettled(phone);
+
     const banded = phone.locator('[data-change-band]');
+    await expect(
+      banded.first(),
+      'Today publishes at least one change band to compare',
+    ).toBeVisible();
     const count = await banded.count();
-    expect(count, 'Today publishes at least one change band to compare').toBeGreaterThan(0);
 
     for (let index = 0; index < count; index += 1) {
       const element = banded.nth(index);
