@@ -67,6 +67,7 @@ functional
 - Browser sources typecheck under exactOptionalPropertyTypes, so a local type mirroring an SDK type with an optional property must spell it `prop?: T | undefined`. Supabase's AuthError.status is number | undefined and will not satisfy a bare `status?: number`.
 - Every element that renders data the signed-in account actually recorded carries a data-entry attribute: a food with its amount, a clock time, a dose, a glucose reading. Screen furniture never does -- slot labels, headings, the date, and any 'not logged' placeholder are the same for every account and are not anybody's data. Ownership is judged on data-entry elements, so the oracle keeps its meaning when a later value reshapes the surface.
 - 'No entries yet.' is what this value renders for a date the account has nothing on, but it is not what the oracle asserts. The oracle asserts that the page carries no data-entry element, because value 2 replaces that sentence with fixed slot cards and the ownership rule must outlive the wording.
+- Verification installs its own dependencies first. `des verify` runs the candidate in an ephemeral checkout that has no node_modules, so `npm run build` there fails with 'tsc: command not found' and every spec with 'playwright: command not found'. `npm ci` is therefore the first declared vector, which is also what a clean CI machine would do and makes the verification self-contained rather than dependent on a developer's tree.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
@@ -107,6 +108,7 @@ Falsifier: Account B's page carries any data-entry element, or any text from a r
 ### Oracle and verification
 Oracle target locator: `tests/acceptance/own-data-only.spec.ts`
 
+Verification command: `npm ci`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/own-data-only.spec.ts`
 ## Meal & Insulin Log product brief, value 2: the Today screen
