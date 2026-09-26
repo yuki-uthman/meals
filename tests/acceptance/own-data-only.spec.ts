@@ -18,24 +18,43 @@ import { seedAccounts, type Account, type SeededAccounts } from '../support/acco
 
 const PHONE_VIEWPORT = { width: 360, height: 780 } as const;
 
-const OWNER_MEAL_LINE = 'Breakfast · 07:40 · Oats 60 g, Milk 200 ml';
-const OWNER_NIGHT_LINE = '18 u at 22:30';
-const EMPTY_DAY_LOG = 'No entries yet.';
+/**
+ * Ownership is judged on data-entry elements, never on wording. An element carries
+ * data-entry exactly when it renders something the signed-in account recorded: a food
+ * with its amount, a clock time, a dose, a glucose reading. Screen furniture -- slot
+ * labels, headings, the date, any 'not logged' placeholder -- is the same for every
+ * account and carries nothing, so this oracle keeps its meaning when a later value
+ * reshapes the plain lines into cards.
+ */
+const DATA_ENTRY = '[data-entry]';
 
-/** Every piece of text that only exists because account A owns a row. */
-const OWNER_ONLY_TEXT = [
-  OWNER_MEAL_LINE,
-  OWNER_NIGHT_LINE,
-  'Breakfast',
+/** Every value account A actually recorded, as it must reach the reading surface. */
+const OWNER_RECORDED = [
+  'Oats 60 g',
+  'Milk 200 ml',
   '07:40',
-  '22:30',
+  '5 u',
+  '104',
+  '186',
+  '18 u at 22:30',
+] as const;
+
+/**
+ * Fragments that exist on the page only because account A owns a row. Deliberately no
+ * slot label and no placeholder: asserting the absence of 'Breakfast' or of an empty-day
+ * sentence would falsely fail once value 2 draws a fixed card per slot for every account.
+ */
+const OWNER_ONLY_TEXT = [
   'Oats',
   'Milk',
   '60 g',
   '200 ml',
+  '07:40',
+  '22:30',
   '104',
   '186',
-  '132',
+  '5 u',
+  '18 u',
 ] as const;
 
 let stack: LocalStack;
@@ -73,6 +92,24 @@ const openPhone = async (browser: Browser): Promise<Page> => {
   return page;
 };
 
+/** The text of every element on the page that claims to render recorded data. */
+const dataEntryText = async (page: Page): Promise<string> => {
+  const texts = await page.locator(DATA_ENTRY).allInnerTexts();
+  return texts.join(' | ').replace(/\s+/g, ' ');
+};
+
+/** Everything the page says, whitespace-normalised, furniture included. */
+const pageText = async (page: Page): Promise<string> =>
+  (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+
+const expectOwnerSeesOwnData = async (page: Page): Promise<void> => {
+  await expect(page.locator(DATA_ENTRY).first()).toBeVisible();
+  const entries = await dataEntryText(page);
+  for (const recorded of OWNER_RECORDED) {
+    expect(entries, `account A must read its own recorded value: ${recorded}`).toContain(recorded);
+  }
+};
+
 const scrollsHorizontally = (page: Page): Promise<boolean> =>
   page.evaluate(() => {
     const root = document.documentElement;
@@ -86,17 +123,18 @@ test("the owning account reads its own day log and a second account reads none o
 
   // Account A signs in and reads its own day log.
   await signIn(phone, accounts.owner);
-  await expect(phone.getByText(OWNER_MEAL_LINE, { exact: true })).toBeVisible();
-  await expect(phone.getByText(OWNER_NIGHT_LINE, { exact: true })).toBeVisible();
-  await expect(phone.getByText(EMPTY_DAY_LOG, { exact: true })).toHaveCount(0);
+  await expectOwnerSeesOwnData(phone);
   expect(await scrollsHorizontally(phone)).toBe(false);
 
   // The same phone, the same bundle: account A signs out, account B signs in.
   await signOut(phone);
   await signIn(phone, accounts.stranger);
 
-  await expect(phone.getByText(EMPTY_DAY_LOG, { exact: true })).toBeVisible();
-  const strangerText = (await phone.locator('body').innerText()).replace(/\s+/g, ' ');
+  // Account B is signed in and reading, so the shell is up and the read has settled.
+  await expect(phone.getByRole('button', { name: /sign out/i })).toBeVisible();
+  await expect(phone.locator(DATA_ENTRY)).toHaveCount(0);
+
+  const strangerText = await pageText(phone);
   for (const owned of OWNER_ONLY_TEXT) {
     expect(strangerText, `account B's page must not show account A's data: ${owned}`).not.toContain(
       owned,
@@ -108,6 +146,5 @@ test("the owning account reads its own day log and a second account reads none o
   // row-level security at work rather than a failed read or a lost seed.
   await signOut(phone);
   await signIn(phone, accounts.owner);
-  await expect(phone.getByText(OWNER_MEAL_LINE, { exact: true })).toBeVisible();
-  await expect(phone.getByText(OWNER_NIGHT_LINE, { exact: true })).toBeVisible();
+  await expectOwnerSeesOwnData(phone);
 });
