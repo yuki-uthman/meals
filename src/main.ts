@@ -155,6 +155,20 @@ const start = (): void => {
    */
   let historyScroll = 0;
   /**
+   * Whether the next render REPLACES the current history entry rather than pushing
+   * one. True for the very first screen, so Back from it leaves the site as the
+   * person expects rather than cycling inside the app, and true again for the
+   * sign-in screen a sign-out lands on, so Back cannot walk into a screen belonging
+   * to the account that just left.
+   */
+  let replaceNextEntry = true;
+  /**
+   * True while a screen is being rebuilt FROM a history entry -- the Back gesture,
+   * or a cold load of a route. Nothing is pushed or replaced while it is: the entry
+   * the browser is already on is the one the screen belongs to.
+   */
+  let restoringRoute = false;
+  /**
    * The section a form was opened from, when it was not the day log. A form that
    * came from History keeps History's navigation, which is how the grid is got
    * back to; a form opened on Today has none, because the way out of one is
@@ -501,14 +515,248 @@ const start = (): void => {
     });
   };
 
+  // --------------------------------------------------------------- the route
+  //
+  // A screen's identity lives in the URL as a HASH route, and its transient
+  // position -- the scroll offset -- lives in that entry's own state. A hash route
+  // rather than a path because this front end is a static bundle on a static host:
+  // a path route would need server rewriting nothing here can do, and would fail on
+  // reload. In-app navigation goes through the browser's history, so the device's
+  // Back gesture pops an entry and returns to the previous screen instead of
+  // leaving the site -- on Android Back is the primary way people move around.
+
+  /** A moment as the reader's own calendar date, never the server's. */
+  const localDateOf = (at: Date): IsoDate =>
+    [
+      String(at.getFullYear()).padStart(4, '0'),
+      String(at.getMonth() + 1).padStart(2, '0'),
+      String(at.getDate()).padStart(2, '0'),
+    ].join('-');
+
+  /** What the screen the person is on calls itself. */
+  const routeFor = (): string => {
+    if (account === null) return '#signin';
+    if (screen === 'history') return '#history';
+    if (screen === 'lookup') return `#lookup/${lookupTab}`;
+    if (screen === 'night') return `#night/${date}`;
+    if (screen === 'food') return '#food';
+    if (screen === 'detail') {
+      return detailMeal === null ? '#detail' : `#detail/${detailMeal.id}`;
+    }
+    if (screen === 'meal' && mealDraft !== null) {
+      // A new entry is named by the date and slot it is being recorded against, so
+      // a backfill reached through Back is the same backfill; an edit is named by
+      // the meal's own id, which is what lets that meal's URL reload to it.
+      return mealDraft.mealId === null
+        ? `#new-meal/${mealDraft.date}/${mealDraft.slot}`
+        : `#meal/${mealDraft.mealId}`;
+    }
+    return `#today/${date}`;
+  };
+
+  /** The position this entry should be restored to when it is come back to. */
+  const entryState = (): { readonly scroll: number } => ({ scroll: historyScroll });
+
+  /**
+   * Publishes the screen as an entry. The same screen redrawn keeps its entry; a
+   * different screen pushes one, after the entry being left is given the position
+   * it was left at, so coming back restores it rather than starting at the top.
+   */
+  const syncRoute = (): void => {
+    if (restoringRoute) return;
+    const route = routeFor();
+    const current = window.location.hash;
+    if (current === route) {
+      window.history.replaceState(entryState(), '', route);
+      return;
+    }
+    if (replaceNextEntry) {
+      replaceNextEntry = false;
+      window.history.replaceState(entryState(), '', route);
+      return;
+    }
+    window.history.replaceState(entryState(), '', current === '' ? route : current);
+    window.history.pushState(entryState(), '', route);
+  };
+
   const render = (): void => {
     root.replaceChildren(
       account === null
         ? signInScreen(signInState, { onSubmit: (credentials) => void submit(credentials) })
         : signedInScreen(),
     );
+    syncRoute();
     if (account !== null && screen === 'history') restoreHistoryScroll();
   };
+
+  /**
+   * One way back, used by both the control and the gesture, so the two cannot
+   * drift apart and the scroll restoration does not have to be written twice.
+   */
+  const goBack = (): void => {
+    window.history.back();
+  };
+
+  /** Everything a screen was holding that the next screen must not inherit. */
+  const clearTransient = (): void => {
+    clearDetail();
+    mealDraft = null;
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
+    formSection = undefined;
+  };
+
+  const rememberedScroll = (state: unknown): number | null => {
+    if (typeof state !== 'object' || state === null || !('scroll' in state)) return null;
+    const offset = Number((state as { readonly scroll: unknown }).scroll);
+    return Number.isFinite(offset) ? offset : null;
+  };
+
+  const isLookupTab = (value: string | undefined): value is LookupTab =>
+    value === 'food' || value === 'change' || value === 'start';
+
+  const isSlot = (value: string | undefined): value is MealSlot =>
+    value === 'breakfast' || value === 'lunch' || value === 'dinner';
+
+  /**
+   * Rebuilds the screen an entry names. Called by the Back gesture and by a cold
+   * load of a URL, which is the same question: what screen is this entry?
+   *
+   * Where the material is already in hand the screen is redrawn from it, because a
+   * read landing a moment later would redraw it underneath the person and take the
+   * restored position with it. Where it is not -- a meal's own URL asked for cold
+   * -- it is read.
+   */
+  const applyRoute = async (hash: string, state: unknown): Promise<void> => {
+    if (account === null) {
+      // Back after signing out cannot walk into a screen belonging to the account
+      // that just left: whatever entry the gesture reached, this app has the
+      // sign-in screen, and the entry is replaced with its own route.
+      screen = 'day';
+      replaceNextEntry = true;
+      render();
+      return;
+    }
+
+    const [name, first, second] = hash.replace(/^#/, '').split('/');
+
+    restoringRoute = true;
+    // The entry being restored is the one the screen belongs to, so nothing is
+    // pushed and nothing replaced: whatever asked for a replacement is answered.
+    replaceNextEntry = false;
+    try {
+      if (name === 'history') {
+        clearTransient();
+        const offset = rememberedScroll(state);
+        if (offset !== null) historyScroll = offset;
+        screen = 'history';
+        if (historyWindow === null && historyMessage === null) {
+          await loadHistory();
+          return;
+        }
+        render();
+        return;
+      }
+
+      if (name === 'lookup') {
+        clearTransient();
+        if (isLookupTab(first)) lookupTab = first;
+        if (lookupMeals === null && lookupMessage === null) {
+          if (!(await loadLookup())) return;
+        }
+        screen = 'lookup';
+        render();
+        return;
+      }
+
+      if (name === 'meal' && first !== undefined) {
+        // The draft in hand IS this meal when its id matches -- coming back from
+        // the Add food screen, say -- so what was filled in survives the gesture.
+        if (mealDraft !== null && mealDraft.mealId === first) {
+          foodDraft = null;
+          formMessage = null;
+          padTarget = null;
+          screen = 'meal';
+          render();
+          return;
+        }
+        // No date in the route: the meal's own day is what it records against.
+        await editMealFromHistory(first, null);
+        return;
+      }
+
+      if (name === 'new-meal' && first !== undefined && isSlot(second)) {
+        if (mealDraft !== null && mealDraft.mealId === null && mealDraft.date === first) {
+          foodDraft = null;
+          formMessage = null;
+          padTarget = null;
+          screen = 'meal';
+          render();
+          return;
+        }
+        await newMealFromHistory(first, second);
+        return;
+      }
+
+      if (name === 'food' && mealDraft !== null) {
+        foodDraft = foodDraft ?? emptyFoodDraft;
+        formMessage = null;
+        padTarget = null;
+        screen = 'food';
+        render();
+        return;
+      }
+
+      if (name === 'night' && first !== undefined) {
+        if (nightDraft !== null && nightHistory !== null && date === first) {
+          formMessage = null;
+          nightPadOpen = false;
+          screen = 'night';
+          render();
+          return;
+        }
+        await openNightFor(first);
+        return;
+      }
+
+      if (name === 'detail' && first !== undefined) {
+        if (detailMeal !== null && detailMeal.id === first) {
+          screen = 'detail';
+          render();
+          return;
+        }
+        await openMealDetail(first);
+        return;
+      }
+
+      if (name === 'today' && first !== undefined) {
+        clearTransient();
+        date = first;
+        screen = 'day';
+        await loadDayLog();
+        return;
+      }
+
+      // An entry this app does not recognise, and the very first signed-in screen:
+      // the day log on the reader's own today, replacing rather than pushing.
+      clearTransient();
+      date = localToday();
+      screen = 'day';
+      restoringRoute = false;
+      replaceNextEntry = true;
+      await loadDayLog();
+    } finally {
+      restoringRoute = false;
+    }
+  };
+
+  window.addEventListener('popstate', (event) => {
+    void applyRoute(window.location.hash, event.state);
+  });
 
   // ------------------------------------------------------------ filling in
 
@@ -712,7 +960,7 @@ const start = (): void => {
    * records against is the cell's own date, so finishing an entry from the grid
    * cannot move the meal to another day.
    */
-  const editMealFromHistory = async (id: string, eatenOn: IsoDate): Promise<void> => {
+  const editMealFromHistory = async (id: string, eatenOn: IsoDate | null): Promise<void> => {
     const found = await logStore.meal(id);
     if (found.kind === 'session-ended') {
       await endSession(found.message);
@@ -728,15 +976,19 @@ const start = (): void => {
       return;
     }
 
-    if (!(await loadRecentMeals(eatenOn))) return;
+    // A meal's own URL asked for cold names no date, so the meal's own day is what
+    // it records against: an edit may never move the meal to today.
+    const recordAgainst = eatenOn ?? localDateOf(found.meal.eatenAt);
+
+    if (!(await loadRecentMeals(recordAgainst))) return;
     if (!(await loadMealHistory())) return;
 
     readToken += 1;
-    date = eatenOn;
+    date = recordAgainst;
     clearDetail();
     // The meal's id travels with the draft, so adding the after reading later
     // updates this row rather than writing a second meal on the date.
-    mealDraft = mealDraftFrom(found.meal, eatenOn);
+    mealDraft = mealDraftFrom(found.meal, recordAgainst);
     foodDraft = null;
     nightDraft = null;
     nightHistory = null;
@@ -974,20 +1226,9 @@ const start = (): void => {
     render();
   };
 
+  /** The same one way back: the screen this one was opened from, wherever that was. */
   const backToDay = (): void => {
-    clearDetail();
-    screen = 'day';
-    render();
-  };
-
-  /**
-   * Back to the grid already in hand, deliberately WITHOUT another read: the
-   * material is the same material, and a read landing a moment later would redraw
-   * the grid underneath the person and take the restored scroll position with it.
-   */
-  const showHistory = (): void => {
-    screen = 'history';
-    render();
+    goBack();
   };
 
   /**
@@ -995,29 +1236,13 @@ const start = (): void => {
    * it was opened FROM rather than to Today. A cell tapped in History leads to the
    * edit form and back to History, at the same scroll position; sending every exit
    * to Today throws away where the person was.
+   *
+   * It goes back through the browser's history rather than setting the screen
+   * itself, so the control and the device's Back gesture are one way back and the
+   * scroll restoration does not have to be written twice.
    */
   const leaveForm = (): void => {
-    const from = formSection;
-    clearDetail();
-    mealDraft = null;
-    foodDraft = null;
-    nightDraft = null;
-    nightHistory = null;
-    formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
-    formSection = undefined;
-    if (from === 'history') {
-      showHistory();
-      return;
-    }
-    if (from === 'lookup') {
-      screen = 'lookup';
-      render();
-      return;
-    }
-    screen = 'day';
-    render();
+    goBack();
   };
 
   const openFoodForm = (): void => {
@@ -1030,12 +1255,13 @@ const start = (): void => {
     render();
   };
 
+  /**
+   * Back to the meal the food was being added to. The food itself has already been
+   * handed back to the draft, so going back through the browser's history redraws
+   * the form with it: the gesture and the control leave this screen the same way.
+   */
   const backToMeal = (): void => {
-    foodDraft = null;
-    formMessage = null;
-    padTarget = null;
-    screen = 'meal';
-    render();
+    goBack();
   };
 
   const removeFood = (index: number): void => {
@@ -1086,6 +1312,9 @@ const start = (): void => {
       formMessage = null;
       padTarget = null;
       formSection = undefined;
+      // The form is done, so its entry is replaced rather than left behind: Back
+      // from what the save returns to must not reopen a form already recorded.
+      replaceNextEntry = true;
       if (from === 'history') {
         void openHistorySection();
         return;
@@ -1135,6 +1364,8 @@ const start = (): void => {
       formMessage = null;
       nightPadOpen = false;
       formSection = undefined;
+      // The night is recorded, so its entry is replaced for the same reason.
+      replaceNextEntry = true;
       if (from === 'history') {
         void openHistorySection();
         return;
@@ -1195,6 +1426,9 @@ const start = (): void => {
     lookupStartTarget = '';
     lookupStartWindow = DEFAULT_START_WINDOW;
     signInState = { ...emptySignInState, message };
+    // Signing out REPLACES the entry the account was on, so Back cannot walk into a
+    // screen belonging to the account that has just left.
+    replaceNextEntry = true;
     render();
   };
 
@@ -1276,13 +1510,19 @@ const start = (): void => {
     lookupStartTarget = '';
     lookupStartWindow = DEFAULT_START_WINDOW;
     if (account === null) {
+      // The sign-in screen replaces the entry the previous account was on.
+      replaceNextEntry = true;
       render();
       return;
     }
     // A session that has just changed hands opens on its own today, never on a
-    // date the previous reader had stepped to.
+    // date the previous reader had stepped to -- unless the URL itself names a
+    // screen, which is how a meal's own URL reloads to that meal. Either way the
+    // entry the browser is already on is the one this screen belongs to, so it is
+    // replaced rather than pushed: Back from the first screen leaves the site.
     date = localToday();
-    void loadDayLog();
+    replaceNextEntry = true;
+    void applyRoute(window.location.hash, window.history.state);
   };
 
   const submit = async (credentials: Credentials): Promise<void> => {
@@ -1305,6 +1545,12 @@ const start = (): void => {
     await identity.signOut();
     showAccount(null);
   };
+
+  // The app restores a position from the entry's own state; leaving the browser's
+  // automatic restoration on would make the two fight over the same offset.
+  if ('scrollRestoration' in window.history) {
+    window.history.scrollRestoration = 'manual';
+  }
 
   identity.onChange(showAccount);
   render();
