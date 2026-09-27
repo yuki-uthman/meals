@@ -33,6 +33,14 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    page, which is also what makes the legend switch with the view.
  *  - A band is read off the rule in src/domain/band.ts and never off the size of the
  *    number: the three-days-ago dinner falls 260 to 200, which is −60, and −60 is dropped.
+ *  - The LEVEL bands are low under 70, in-range 70 to 140, elevated 141 to 180 and high 181
+ *    and above. 'very-high' is retired outright rather than left unused, because a band
+ *    nothing can fall into is a rule nobody can read, so its absence is asserted too: 260 and
+ *    190 now fall in the same top band, and the backfilled 150 is the elevated one.
+ *  - The legend fits on ONE ROW, so its visible labels are the RANGES alone and the meaning
+ *    lives in each entry's accessible name -- 'Low, under 70', 'In range, 70 to 140'. The
+ *    range is what a person reading the colours needs; the word is what anyone not reading
+ *    them needs, and asserting only one of the two would license dropping the other.
  *  - Nothing behind a cell means an empty outline: no band and no digits, because a missing
  *    measurement is never drawn as a change of zero. A meal with no after reading has no
  *    change, so it is empty in Change and Both and still shows its before reading in Before.
@@ -86,8 +94,45 @@ const EMAIL_PREFIX = 'history-grid';
 const LEVEL_CAPTION = 'Colour is the level of that reading. Tap a cell to open that meal.';
 const CHANGE_CAPTION = 'Colour is the change, not the level. Tap a cell to open that meal.';
 
-const LEVEL_BANDS = ['low', 'in-range', 'high', 'very-high'] as const;
+/**
+ * The level bands, as the thresholds now stand: low under 70, in-range 70 to 140, elevated
+ * 141 to 180, high 181 and above. 'very-high' is retired outright rather than left unused,
+ * because a band nothing can fall into is a rule nobody can read -- so its ABSENCE is
+ * asserted as well as the four that remain.
+ */
+const LEVEL_BANDS = ['low', 'in-range', 'elevated', 'high'] as const;
+const RETIRED_LEVEL_BAND = 'very-high';
 const CHANGE_BANDS = ['dropped', 'stable', 'rose', 'rose-high'] as const;
+
+/**
+ * The legend's four level entries. The visible label is the RANGE alone, because four labels
+ * carrying their words wrap to a second row, push the grid down the screen and read as two
+ * groups rather than one scale; the WORD lives in the accessible name, because the range is
+ * what a person reading the colours needs and the word is what anyone not reading them needs.
+ *
+ * The range is matched on its numbers and its words rather than on the exact separator glyph:
+ * whether a range is written with a tilde, a dash or the word 'to' is presentation, while
+ * which numbers bound which band is the rule.
+ */
+const LEVEL_LEGEND = [
+  { band: 'low', spoken: 'Low, under 70', range: /under\s*70/i },
+  { band: 'in-range', spoken: 'In range, 70 to 140', range: /\b70\b\D+\b140\b/ },
+  { band: 'elevated', spoken: 'Elevated, 141 to 180', range: /\b141\b\D+\b180\b/ },
+  { band: 'high', spoken: 'High, 181 and above', range: /above\s*181|181\s*(and above|\+)/i },
+] as const;
+
+/**
+ * The change legend's visible ranges. Its accessible names are required to carry a WORD --
+ * the same obligation the level entries have -- but the exact wording of those four is not
+ * fixed by the design, so it is not invented here: what is asserted is that the meaning is
+ * spoken at all, and which band each entry is.
+ */
+const CHANGE_LEGEND_RANGES = [
+  /-\s*40 or less/i,
+  /-\s*39\D+\+?\s*30/,
+  /\+?\s*31\D+\+?\s*60/,
+  /above\s*\+?\s*60/i,
+] as const;
 
 /**
  * The floor: the grid runs from today back to whichever is EARLIER, ninety days ago or the
@@ -234,7 +279,9 @@ const rows: readonly RowExpectation[] = [
       {
         column: 3,
         names: /dinner/i,
-        before: { reads: ['260'], band: 'very-high' },
+        // 181 and above is 'high': the top band now has no ceiling above it, so a 260 and
+        // the 190 two rows up fall in the same band rather than in two.
+        before: { reads: ['260'], band: 'high' },
         // −60 is dropped. A rule read off the magnitude would say rose here and fail.
         change: { reads: ['-60'], band: 'dropped' },
         both: { reads: ['260', '200'], band: 'dropped' },
@@ -662,21 +709,139 @@ const controlCount = async (cell: Locator): Promise<number> =>
   (await cell.getByRole('link').count()) + (await cell.getByRole('button').count());
 
 /**
- * Which band names are published anywhere on the page BESIDE a word. A cell carries only
- * numbers, so a band name that appears beside letters is the legend naming it in words.
+ * The legend's entries: the banded things on the screen that are NOT cells of the grid.
+ *
+ * Located this way rather than by looking for a band published beside a WORD, which is what
+ * this helper used to do. The legend's visible labels are now the ranges alone -- '70 ~ 140'
+ * carries no letters at all -- so a word test would silently stop finding half the legend and
+ * report a correct product as broken. The grid's own region is already located here, and the
+ * legend sits outside it at the top of the screen, so 'banded but not in the grid' is the
+ * legend without depending on how the legend itself is marked up.
  */
-const bandsNamedInWords = async (page: Page, attribute: string): Promise<Set<string>> => {
+const legendEntries = async (page: Page, attribute: string): Promise<Locator[]> => {
   const nodes = page.locator(`[${attribute}]`);
-  const named = new Set<string>();
+  const entries: Locator[] = [];
   for (let index = 0; index < (await nodes.count()); index += 1) {
     const node = nodes.nth(index);
-    const value = await node.getAttribute(attribute);
-    const text = (await node.innerText()).trim();
-    if (value && /[A-Za-z]/.test(text)) {
-      named.add(value);
+    // A cell always sits inside a row of the grid, whether the grid is a table or a list, and
+    // a legend entry never does. Both tests are applied so that neither the grid's markup
+    // choice nor where the legend is nested can turn a legend entry into a cell or back.
+    const isCell = await node.evaluate((element) => {
+      const inRow = element.closest('tr, [role="row"], li, [role="listitem"]') !== null;
+      const region = element.closest('[role="region"]')?.getAttribute('aria-label') ?? '';
+      return inRow || /history/i.test(region);
+    });
+    if (!isCell) {
+      entries.push(node);
     }
   }
+  return entries;
+};
+
+/** Which bands the legend publishes, whichever kind the view is coloured by. */
+const bandsInLegend = async (page: Page, attribute: string): Promise<Set<string>> => {
+  const named = new Set<string>();
+  for (const entry of await legendEntries(page, attribute)) {
+    const value = await entry.getAttribute(attribute);
+    if (value !== null) named.add(value);
+  }
   return named;
+};
+
+/** What one legend entry says out loud: its accessible name, or its text where it has none. */
+const spokenNameOf = async (entry: Locator): Promise<string> => {
+  const label = await entry.getAttribute('aria-label');
+  if (label !== null && label.trim() !== '') return label.trim();
+  const described = entry.locator('[aria-label]');
+  if ((await described.count()) > 0) {
+    return ((await described.first().getAttribute('aria-label')) ?? '').trim();
+  }
+  return textOf(entry);
+};
+
+/**
+ * The legend fits on ONE ROW: four labels wrapping to a second row push the grid down the
+ * screen and read as two groups rather than one scale. Read off the boxes, because that is
+ * the only place 'one row' exists.
+ */
+const assertLegendOnOneRow = async (page: Page, attribute: string, view: string): Promise<void> => {
+  const boxes = await Promise.all(
+    (await legendEntries(page, attribute)).map((entry, index) =>
+      rectOf(entry, `the ${view} legend's entry ${index + 1}`),
+    ),
+  );
+  expect(boxes.length, `the ${view} legend has its four entries`).toBe(4);
+  const tops = boxes.map((box) => box.y);
+  expect(
+    Math.max(...tops) - Math.min(...tops),
+    `the ${view} legend fits on one row rather than wrapping to a second`,
+  ).toBeLessThanOrEqual(4);
+};
+
+/**
+ * The level legend: the range alone visible, and the meaning in the accessible name. The
+ * range is what a person reading the colours needs; the word is what anyone not reading the
+ * colours needs, and a legend that showed only the range would leave them nothing.
+ */
+const assertLevelLegend = async (page: Page): Promise<void> => {
+  const entries = await legendEntries(page, 'data-level-band');
+  expect(entries.length, 'the legend names the four level bands').toBe(4);
+
+  for (const expected of LEVEL_LEGEND) {
+    const matching = [] as Locator[];
+    for (const entry of entries) {
+      if ((await entry.getAttribute('data-level-band')) === expected.band) matching.push(entry);
+    }
+    expect(matching.length, `exactly one legend entry for '${expected.band}'`).toBe(1);
+    const entry = matching[0] as Locator;
+    expect(
+      normaliseSigns(await textOf(entry)),
+      `the '${expected.band}' legend entry shows its RANGE, which is all one row has room for`,
+    ).toMatch(expected.range);
+    expect(
+      await spokenNameOf(entry),
+      `the '${expected.band}' legend entry keeps its MEANING in its accessible name`,
+    ).toContain(expected.spoken);
+  }
+
+  await assertLegendOnOneRow(page, 'data-level-band', 'level');
+};
+
+/** The change legend: the four ranges visible, and a word spoken for each. */
+const assertChangeLegend = async (page: Page, view: string): Promise<void> => {
+  const entries = await legendEntries(page, 'data-change-band');
+  expect(entries.length, `the ${view} view's legend names the four change bands`).toBe(4);
+
+  const visible = normaliseSigns(
+    (await Promise.all(entries.map((entry) => textOf(entry)))).join(' | '),
+  );
+  for (const range of CHANGE_LEGEND_RANGES) {
+    expect(visible, `the ${view} legend shows the range ${range.source}`).toMatch(range);
+  }
+  for (const entry of entries) {
+    expect(
+      await spokenNameOf(entry),
+      `each ${view} legend entry says what its band MEANS, not only its range`,
+    ).toMatch(/[A-Za-z]{3}/);
+  }
+
+  await assertLegendOnOneRow(page, 'data-change-band', 'change');
+};
+
+/**
+ * 'very-high' is retired outright, so nothing on the screen may still publish it: a band
+ * nothing can fall into is a rule nobody can read, and a legend entry for one is worse than
+ * unused -- it tells the reader a colour exists that no reading of theirs will ever be.
+ */
+const assertRetiredBandGone = async (page: Page): Promise<void> => {
+  await expect(
+    page.locator(`[data-level-band="${RETIRED_LEVEL_BAND}"]`),
+    `nothing publishes the retired '${RETIRED_LEVEL_BAND}' band`,
+  ).toHaveCount(0);
+  expect(
+    await textOf(page.locator('body')),
+    `and no wording is left over from '${RETIRED_LEVEL_BAND}'`,
+  ).not.toMatch(/very high|over 250/i);
 };
 
 type View = 'before' | 'change' | 'both';
@@ -858,11 +1023,13 @@ test('the grid opens on Before: one row per day, four chronological columns, col
     'nothing in the Before view is banded by change',
   ).toHaveCount(0);
 
-  // The legend names the four level bands in words.
+  // The legend names the four level bands -- the range visible, the word spoken -- on one row.
   expect(
-    [...(await bandsNamedInWords(phone, 'data-level-band'))].sort(),
-    'the legend names the four level bands in words',
+    [...(await bandsInLegend(phone, 'data-level-band'))].sort(),
+    'the legend names the four level bands',
   ).toEqual([...LEVEL_BANDS].sort());
+  await assertLevelLegend(phone);
+  await assertRetiredBandGone(phone);
 
   // Four columns plus the day label at 360 px, with no horizontal scrolling.
   expect(await scrollsHorizontally(phone), 'the grid fits 360 px').toBe(false);
@@ -900,9 +1067,10 @@ test('Change shows the signed change and Both shows the two readings, each colou
     ).toHaveCount(0);
 
     expect(
-      [...(await bandsNamedInWords(phone, 'data-change-band'))].sort(),
-      `the ${view} view's legend names the four change bands in words`,
+      [...(await bandsInLegend(phone, 'data-change-band'))].sort(),
+      `the ${view} view's legend names the four change bands`,
     ).toEqual([...CHANGE_BANDS].sort());
+    await assertChangeLegend(phone, view);
 
     await assertNoPeriodControls(phone);
     expect(await scrollsHorizontally(phone), `the ${view} view fits 360 px`).toBe(false);
@@ -1034,10 +1202,13 @@ test('an empty cell is where a day kept on paper gets filled in', async ({ brows
     await textOf(filled),
     'the backfilled reading landed on the date the cell named',
   ).toContain('150');
+  // 150 is ELEVATED -- 141 to 180 -- and this is the one cell in the whole oracle that falls
+  // in that band, so the band that the new thresholds introduced is exercised by a real
+  // reading rather than only named in the legend.
   await expect(
     filled.locator('[data-level-band]'),
     'and is banded by the same level rule as every other cell',
-  ).toHaveAttribute('data-level-band', 'in-range');
+  ).toHaveAttribute('data-level-band', 'elevated');
 
   // It landed there and nowhere else: today's dinner cell is still empty.
   const todayDinner = await cellAt(await rowFor(phone, 0), 3);
@@ -1353,10 +1524,16 @@ test("another account's grid holds none of the owner's readings", async ({ brows
     await expect(grid(phone).locator('[data-level-band]')).toHaveCount(0);
     await expect(grid(phone).locator('[data-change-band]')).toHaveCount(0);
     expect(
-      [...(await bandsNamedInWords(phone, view === 'before' ? 'data-level-band' : 'data-change-band'))]
+      [...(await bandsInLegend(phone, view === 'before' ? 'data-level-band' : 'data-change-band'))]
         .sort(),
       `${view}: the legend still names its four bands`,
     ).toEqual([...(view === 'before' ? LEVEL_BANDS : CHANGE_BANDS)].sort());
+    if (view === 'before') {
+      await assertLevelLegend(phone);
+      await assertRetiredBandGone(phone);
+    } else {
+      await assertChangeLegend(phone, view);
+    }
     // Every cell is offered to fill in, because this account's log is empty and backfilling
     // is what an empty grid is for. That is a control per cell and not one reading.
     const strangerRow = await rowFor(phone, 3);
