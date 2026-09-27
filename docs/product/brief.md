@@ -59,7 +59,7 @@ Reason:     Version one is a personal log for at most two people; anything that 
 -     Users: one or two, each with a separate account and separate data. A second user is invited by creating their account; no data is shared.
 -     Food type list: carb-heavy, protein, vegetable, fruit, dairy, mixed dish, drink. Amount units: g, ml, pc, cup, tbsp.
 -     Same meal means the same set of foods with the same amounts and units; slot, time, readings, dose and context are per instance.
--     History colour rule: the Before view is coloured by the level of that reading (low under 70, in range 70 to 180, high 181 to 250, very high over 250); the Change and Both views are coloured by the change (dropped 40 or more, stable within +30, rose +31 to +60, rose over +60). The colour never reflects the absolute level in the Change and Both views.
+-     History colour rule: the Before view is coloured by the level of that reading (low under 70, in range 70 to 140, elevated 141 to 180, high 181 and above); the Change and Both views are coloured by the change (dropped 40 or more, stable within +30, rose +31 to +60, rose over +60). The colour never reflects the absolute level in the Change and Both views.
 -     Expected after = before reading plus the change of the most recent entry with the same foods, the same meal slot and the same dose; if no such entry exists, no estimate is shown.
 -     Lookups return past meals nearest to the target first; each result shows how far off it was and links to that meal.
 -     Night insulin is a separate daily record (dose, time, bedtime glucose), not a meal.
