@@ -31,12 +31,19 @@ import {
 } from './domain/history';
 import { instancesOf, type InstanceRow, type MealInstance } from './domain/meal-identity';
 import {
+  CHOOSE_OR_CREATE,
+  NEEDS_TYPE,
+  ownedFood,
+  withCatalogueFood,
+  type CatalogueFood,
+} from './domain/food-catalogue';
+import {
   emptyFoodDraft,
-  foodDraftRefusal,
   mealDraftFrom,
   mealDraftRefusal,
   mealRecording,
   newMealDraft,
+  NO_FOOD_NAME_REFUSAL,
   repeatMealDraft,
   withFood,
   withoutFood,
@@ -61,7 +68,7 @@ import {
 } from './domain/recent-readings';
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
-import { FOOD_FORM_TITLE, foodForm } from './ui/food-form';
+import { FOOD_FORM_TITLE, foodForm, type NameState } from './ui/food-form';
 import { mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
@@ -81,6 +88,9 @@ const mount = (): HTMLElement => {
   if (root === null) throw new Error('Missing #app mount point');
   return root;
 };
+
+/** A name still being worked out: neither one of the person's foods nor a new one. */
+const TYPED_NAME: NameState = { kind: 'typed' };
 
 const start = (): void => {
   const root = mount();
@@ -211,6 +221,22 @@ const start = (): void => {
   let detailRefusal: string | null = null;
   let mealDraft: MealDraft | null = null;
   let foodDraft: FoodDraft | null = null;
+  /**
+   * The signed-in account's own foods, read before the Add food screen is shown and
+   * re-read every time it is: what is offered must be what the store holds, never
+   * what an abandoned screen was holding. Held here rather than in the screen for
+   * the same reason a draft is -- the screen is a pure function of it.
+   */
+  let catalogue: readonly CatalogueFood[] = [];
+  /**
+   * What the name field currently is: a name being typed, one of the account's own
+   * foods, or a name the person has asked to make a food of. Nothing moves to the
+   * last on its own, which is what keeps a name one letter off an existing food from
+   * quietly becoming a second entry.
+   */
+  let foodNameState: NameState = TYPED_NAME;
+  /** Guards the one write a food creation makes against a second press of Save. */
+  let creatingFood = false;
   let nightDraft: NightDraft | null = null;
   /**
    * The five nights the night screen lists. Read before the screen is shown, not
@@ -325,7 +351,7 @@ const start = (): void => {
           onInsulinUnits: (insulinUnits) => patchMeal({ insulinUnits }),
           onExerciseContext: (exerciseContext: ExerciseContext) => patchMeal({ exerciseContext }),
           onNote: (note) => patchMeal({ note }),
-          onAddFood: () => openFoodForm(),
+          onAddFood: () => void openFoodForm(),
           onRemoveFood: (index) => removeFood(index),
         },
       ),
@@ -334,14 +360,16 @@ const start = (): void => {
   const foodScreen = (draft: FoodDraft): HTMLElement =>
     shell(
       { date, isToday: date === localToday(), form: { title: FOOD_FORM_TITLE, busy: false } },
-      { ...dayHandlers, onCancel: () => backToMeal(), onSave: () => keepFood() },
+      { ...dayHandlers, onCancel: () => backToMeal(), onSave: () => void keepFood() },
       foodForm(
-        { draft, message: formMessage },
+        { draft, message: formMessage, catalogue, name: foodNameState },
         {
           onName: (name) => patchFood({ name }),
           onFoodType: (foodType: FoodType) => patchFood({ foodType }),
           onAmount: (amount) => patchFood({ amount }),
           onUnit: (unit: AmountUnit) => patchFood({ unit }),
+          onChoose: (food) => chooseFood(food),
+          onCreate: () => createFood(),
         },
       ),
     );
@@ -649,6 +677,8 @@ const start = (): void => {
     clearDetail();
     mealDraft = null;
     foodDraft = null;
+    // What the name field was belongs to the Add food screen being left.
+    foodNameState = TYPED_NAME;
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
@@ -750,7 +780,13 @@ const start = (): void => {
       }
 
       if (name === 'food' && mealDraft !== null) {
-        foodDraft = foodDraft ?? emptyFoodDraft;
+        // A screen rebuilt from an entry with no draft in hand is a fresh Add food,
+        // so its name is a name being typed and its catalogue is read.
+        if (foodDraft === null) {
+          if (!(await loadFoodCatalogue())) return;
+          foodDraft = emptyFoodDraft;
+          foodNameState = TYPED_NAME;
+        }
         formMessage = null;
         padTarget = null;
         screen = 'food';
@@ -1311,14 +1347,79 @@ const start = (): void => {
     goBack();
   };
 
-  const openFoodForm = (): void => {
+  /**
+   * The foods the Add food screen offers. Read through the port with no account
+   * identifier anywhere, so row-level security is the only thing that decides whose
+   * foods can appear beneath the name field.
+   *
+   * A read that failed costs the offer and nothing else: adding a food must never
+   * wait on a convenience, so the screen opens offering nothing and the food can
+   * still be created.
+   */
+  const loadFoodCatalogue = async (): Promise<boolean> => {
+    const outcome = await logStore.foodCatalogue();
+    if (outcome.kind === 'session-ended') {
+      await endSession(outcome.message);
+      return false;
+    }
+    catalogue = outcome.kind === 'loaded' ? outcome.foods : [];
+    return true;
+  };
+
+  /**
+   * The catalogue is read BEFORE the screen is shown, exactly as the five nights and
+   * the pad's chips are: a list that arrived after the person had begun typing would
+   * be a moving target. It is re-read on every opening, so what is offered is what
+   * the store holds rather than what the last visit to this screen was holding.
+   */
+  const openFoodForm = async (): Promise<void> => {
+    if (!(await loadFoodCatalogue())) return;
     foodDraft = emptyFoodDraft;
+    foodNameState = TYPED_NAME;
     formMessage = null;
     // The pad belongs to the field it was opened on; leaving that screen closes
     // it rather than carrying it to the next one.
     padTarget = null;
     screen = 'food';
     render();
+  };
+
+  /**
+   * One of the person's own foods, chosen from the list. It fills the name and takes
+   * the type, which is why the type is then stated rather than asked for again: the
+   * type is a property of the food and is already answered.
+   */
+  const chooseFood = (food: CatalogueFood): void => {
+    if (foodDraft === null) return;
+    foodDraft = { ...foodDraft, name: food.name, foodType: food.foodType };
+    foodNameState = { kind: 'chosen', food };
+    formMessage = null;
+    render();
+  };
+
+  /**
+   * The typed name is to become a food. Pressing this -- and nothing else -- is what
+   * makes a food new, and it is what reveals the type chooser, because a food cannot
+   * enter the catalogue without a type. It writes nothing yet: the write happens when
+   * the food is handed back, which is where its type is finally known.
+   */
+  const createFood = (): void => {
+    if (foodDraft === null) return;
+    foodNameState = { kind: 'creating' };
+    formMessage = null;
+    render();
+  };
+
+  /**
+   * The food the meal records, which is the CATALOGUE's food: its own name and its
+   * own type, so 'oats ' is recorded as the 'Oats' the catalogue holds and the type
+   * is the food's rather than whatever the screen last showed. Only the amount and
+   * the unit come from what was just typed.
+   */
+  const addFoodToMeal = (food: CatalogueFood, draft: FoodDraft): void => {
+    if (mealDraft === null) return;
+    mealDraft = withFood(mealDraft, { ...draft, name: food.name, foodType: food.foodType });
+    backToMeal();
   };
 
   /**
@@ -1336,17 +1437,67 @@ const start = (): void => {
     render();
   };
 
-  /** The Add food screen hands its food back to the meal being filled in. */
-  const keepFood = (): void => {
-    if (foodDraft === null || mealDraft === null) return;
-    const refusal = foodDraftRefusal(foodDraft);
-    if (refusal !== null) {
-      formMessage = refusal;
+  /**
+   * The Add food screen hands its food back to the meal being filled in -- and, when
+   * the food is a new one, puts it into the catalogue on the way. The food is written
+   * HERE rather than when the meal is saved, so a food created once never has to be
+   * typed again even if the meal is then abandoned.
+   *
+   * Every refusal is refused in place: the screen stays, says why, and the name the
+   * person typed is still there to correct.
+   */
+  const keepFood = async (): Promise<void> => {
+    const draft = foodDraft;
+    if (draft === null || mealDraft === null || creatingFood) return;
+
+    const typed = draft.name.trim();
+    if (typed === '') {
+      formMessage = NO_FOOD_NAME_REFUSAL;
       render();
       return;
     }
-    mealDraft = withFood(mealDraft, foodDraft);
-    backToMeal();
+
+    if (foodNameState.kind === 'creating') {
+      if (draft.foodType === null) {
+        // A food cannot enter the catalogue without a type, so nothing is written.
+        formMessage = NEEDS_TYPE;
+        render();
+        return;
+      }
+
+      creatingFood = true;
+      const outcome = await logStore.createFood(typed, draft.foodType);
+      creatingFood = false;
+
+      if (outcome.kind === 'session-ended') {
+        await endSession(outcome.message);
+        return;
+      }
+      if (outcome.kind !== 'created') {
+        // Refused or unreachable: nothing was written, and the account keeps the food
+        // it already has, with its own type.
+        formMessage = outcome.message;
+        render();
+        return;
+      }
+
+      catalogue = withCatalogueFood(catalogue, outcome.food);
+      addFoodToMeal(outcome.food, draft);
+      return;
+    }
+
+    // Not a creation, so the name must already be one of this account's foods --
+    // whether it was chosen from the list or typed out. Which food that is, is the
+    // domain's rule, on the normalised name.
+    const owned = ownedFood(catalogue, typed);
+    if (owned === null) {
+      // Nothing is created silently: the two offers are on the screen already.
+      formMessage = CHOOSE_OR_CREATE;
+      render();
+      return;
+    }
+
+    addFoodToMeal(owned, draft);
   };
 
   const saveMeal = async (): Promise<void> => {
@@ -1467,6 +1618,11 @@ const start = (): void => {
     padTarget = null;
     nightPadOpen = false;
     formSection = undefined;
+    foodNameState = TYPED_NAME;
+    creatingFood = false;
+    // A catalogue is the account's own foods, so it goes with the account: no food
+    // of the account that has just left may ever be offered to the next one.
+    catalogue = [];
     // Readings belong to the account that recorded them, so they go with it.
     recentMeals = [];
     // So does the history an estimate would be built from: no estimate may ever be
@@ -1552,6 +1708,10 @@ const start = (): void => {
     padTarget = null;
     nightPadOpen = false;
     formSection = undefined;
+    foodNameState = TYPED_NAME;
+    creatingFood = false;
+    // And the catalogue: a food of the previous account's may never be offered.
+    catalogue = [];
     // A change of hands takes the previous person's readings with it: a chip must
     // never repeat a reading that belongs to somebody else.
     recentMeals = [];

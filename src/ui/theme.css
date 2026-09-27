@@ -1594,3 +1594,61 @@ label {
   font-size: 0.875rem;
   font-weight: 600;
 }
+
+/* ------------------------------------------------------- the food catalogue */
+
+/* The person's own foods, offered directly beneath the name field so the list reads
+   as an answer to what is being typed. A column rather than a row: a food's name is
+   as long as it is, and a row of them would be the one thing on this screen that
+   could push the document sideways at 360 px. */
+.catalogue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* Each offer is a full-width tap target, and its text wraps rather than widening.
+   Left-aligned, because it is a name being read and not a label being pressed. */
+.catalogue__food,
+.catalogue__create {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.catalogue__food:focus-visible,
+.catalogue__create:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Creating a food is a different offer from choosing one, so it does not look like
+   one more food in the list: dashed, in the accent colour, exactly as an empty
+   History cell says 'nothing here yet, and you may put something here'. */
+.catalogue__create {
+  border-style: dashed;
+  border-color: var(--dashed-edge);
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The type a chosen food already has. It is stated as quietly as any other piece of
+   furniture, because it is not a question: the food answered it. */
+.catalogue__type {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}

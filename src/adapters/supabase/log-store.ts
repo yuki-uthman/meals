@@ -3,7 +3,9 @@ import { SESSION_ENDED, UNREACHABLE_SERVER } from '../../ports/identity';
 import {
   MEAL_NOT_HERE,
   MEAL_NOT_SAVED,
+  type CreateFoodOutcome,
   type DayLogOutcome,
+  type FoodCatalogueOutcome,
   type HistoryWindowOutcome,
   type LogStore,
   type MealHistoryOutcome,
@@ -13,6 +15,7 @@ import {
   type SaveMealOutcome,
   type SaveNightOutcome,
 } from '../../ports/log-store';
+import { ALREADY_OWNED, type CatalogueFood } from '../../domain/food-catalogue';
 import type { MealInstance } from '../../domain/meal-identity';
 import type { RecentMeal } from '../../domain/recent-readings';
 import { shiftDate } from '../../domain/entry';
@@ -349,7 +352,103 @@ const toMealFailure = (error: PostgrestError, status: number): MealOutcome =>
     ? { kind: 'session-ended', message: SESSION_ENDED }
     : { kind: 'retry', message: UNREACHABLE_SERVER };
 
+// ------------------------------------------------------------ the catalogue
+
+/**
+ * A food of its own, with the meals it has been eaten in. The uses come back so the
+ * domain can order the offer by when each food was last used; which foods a typed
+ * name offers, and how many, is decided there and never here.
+ */
+const FOOD_SELECT = 'id, name, food_type, created_at, meal_foods ( meals ( eaten_at ) )';
+
+type FoodUseRow = { meals?: unknown };
+
+type CatalogueRow = {
+  id?: unknown;
+  name?: unknown;
+  food_type?: unknown;
+  created_at?: unknown;
+  meal_foods?: unknown;
+};
+
+/** PostgREST returns a to-one embed as an object; older shapes return an array. */
+const embeddedMeal = (value: unknown): { eaten_at?: unknown } | null => {
+  const one = Array.isArray(value) ? value[0] : value;
+  return typeof one === 'object' && one !== null ? (one as { eaten_at?: unknown }) : null;
+};
+
+const lastEatenAt = (uses: unknown): Date | null => {
+  const rows = Array.isArray(uses) ? (uses as FoodUseRow[]) : [];
+  const times = rows.flatMap((use): Date[] => {
+    const meal = embeddedMeal(use.meals);
+    const at = meal === null ? null : asText(meal.eaten_at);
+    return at === null ? [] : [new Date(at)];
+  });
+  if (times.length === 0) return null;
+  return times.reduce((latest, at) => (at > latest ? at : latest));
+};
+
+const toCatalogueFood = (row: CatalogueRow): CatalogueFood => ({
+  id: String(row.id),
+  name: typeof row.name === 'string' ? row.name : '',
+  // The column is constrained to the seven types, so whatever came back is one.
+  foodType: String(row.food_type) as FoodType,
+  addedAt: new Date(String(row.created_at)),
+  lastEatenAt: lastEatenAt(row.meal_foods),
+});
+
+/** And for the catalogue read, read exactly the same way. */
+const toCatalogueFailure = (error: PostgrestError, status: number): FoodCatalogueOutcome =>
+  isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+
+/** Postgres's unique violation: this account already owns that normalised name. */
+const UNIQUE_VIOLATION = '23505';
+
+const toCreateFoodFailure = (error: PostgrestError, status: number): CreateFoodOutcome => {
+  if (error.code === UNIQUE_VIOLATION) return { kind: 'refused', message: ALREADY_OWNED };
+  return isSessionGone(error, status)
+    ? { kind: 'session-ended', message: SESSION_ENDED }
+    : { kind: 'retry', message: UNREACHABLE_SERVER };
+};
+
 export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
+  foodCatalogue: async (): Promise<FoodCatalogueOutcome> => {
+    try {
+      // No user_id filter here either: row-level security is the only thing that
+      // decides whose foods an Add food screen can ever offer, so another
+      // account's food is never sent rather than being filtered out afterwards.
+      const result = await client.from('foods').select(FOOD_SELECT);
+      if (result.error !== null) return toCatalogueFailure(result.error, result.status);
+      return {
+        kind: 'loaded',
+        foods: ((result.data ?? []) as CatalogueRow[]).map(toCatalogueFood),
+      };
+    } catch {
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
+  createFood: async (name: string, foodType: FoodType): Promise<CreateFoodOutcome> => {
+    try {
+      // No user_id: the column defaults to auth.uid() and the insert policy checks
+      // it, so who owns a created food is decided by Postgres. The name is written
+      // trimmed; the unique index normalises it further to decide identity, and a
+      // second entry differing only in case is refused by that index rather than
+      // by a guess made here.
+      const created = await client
+        .from('foods')
+        .insert({ name: name.trim(), food_type: foodType })
+        .select('id, name, food_type, created_at')
+        .single();
+      if (created.error !== null) return toCreateFoodFailure(created.error, created.status);
+      return { kind: 'created', food: toCatalogueFood(created.data as CatalogueRow) };
+    } catch {
+      return { kind: 'retry', message: UNREACHABLE_SERVER };
+    }
+  },
+
   meal: async (id: string): Promise<MealOutcome> => {
     try {
       // No user_id filter here either: the select policy is the only thing that

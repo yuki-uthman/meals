@@ -1,9 +1,10 @@
-import type { DayLog, IsoDate, Meal } from '../domain/entry';
+import type { DayLog, FoodType, IsoDate, Meal } from '../domain/entry';
 import type { MealRecording } from '../domain/meal-draft';
 import type { NightRecording, NightWindow } from '../domain/night';
 import type { MealInstance } from '../domain/meal-identity';
 import type { RecentMeal } from '../domain/recent-readings';
 import type { HistoryWindow } from '../domain/history';
+import type { CatalogueFood } from '../domain/food-catalogue';
 
 // Reading the signed-in account's own entries for one date, and recording a meal.
 //
@@ -90,8 +91,46 @@ export type HistoryWindowOutcome =
   | { readonly kind: 'retry'; readonly message: string }
   | { readonly kind: 'session-ended'; readonly message: string };
 
+export type FoodCatalogueOutcome =
+  | { readonly kind: 'loaded'; readonly foods: readonly CatalogueFood[] }
+  /**
+   * The server could not be reached. The Add food screen simply offers nothing,
+   * exactly as the pad carries no chips: filling in a meal never waits on a
+   * convenience.
+   */
+  | { readonly kind: 'retry'; readonly message: string }
+  | { readonly kind: 'session-ended'; readonly message: string };
+
+export type CreateFoodOutcome =
+  | { readonly kind: 'created'; readonly food: CatalogueFood }
+  /**
+   * The account already owns that food on its normalised name. Nothing was
+   * written, so the food it owns keeps its own type.
+   */
+  | { readonly kind: 'refused'; readonly message: string }
+  /** The server could not be reached. Nothing was created and the name is kept. */
+  | { readonly kind: 'retry'; readonly message: string }
+  | { readonly kind: 'session-ended'; readonly message: string };
+
 export type LogStore = {
   dayLog: (date: IsoDate) => Promise<DayLogOutcome>;
+  /**
+   * Every food the signed-in account has recorded as a food of its own, with when
+   * it was added and when it was last eaten. Which of them a typed name offers,
+   * and in what order, is the domain's rule and not this query's: the whole
+   * catalogue comes back -- it is one person's foods -- and nothing about the
+   * offer is decided in SQL.
+   */
+  foodCatalogue: () => Promise<FoodCatalogueOutcome>;
+  /**
+   * Puts one food into the catalogue. It is written when the food is CREATED and
+   * not when the meal is saved, because a food created once must never have to be
+   * typed again even if the meal is then abandoned, and a food is harmless on its
+   * own. Uniqueness on the normalised name is Postgres's to enforce, so a second
+   * entry for a name differing only in case comes back refused rather than being
+   * guessed at here.
+   */
+  createFood: (name: string, foodType: FoodType) => Promise<CreateFoodOutcome>;
   /**
    * Everything the History grid is read from, for the dates `from` to `to`
    * inclusive: the meals on those dates, and the nights that led into them --
