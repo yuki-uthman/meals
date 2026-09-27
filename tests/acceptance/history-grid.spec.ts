@@ -186,7 +186,7 @@ const rows: readonly RowExpectation[] = [
         change: { reads: ['+21'], band: 'stable' },
         both: { reads: ['112', '133'], band: 'stable' },
       },
-      // No dinner was eaten: an empty outline in every view, and not tappable.
+      // No dinner was eaten: an empty outline in every view, still offered to fill in.
       { column: 3, names: /dinner/i, before: null, change: null, both: null },
     ],
   },
