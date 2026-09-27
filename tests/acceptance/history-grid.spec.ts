@@ -52,6 +52,18 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *  - A slot cell with a meal behind it opens that meal's EDIT form, which is where the after
  *    reading taken two hours later gets added; a night cell opens the night screen for that
  *    night.
+ *  - In-app navigation goes through the BROWSER'S HISTORY, so the device's Back gesture does
+ *    what Cancel does -- returns to the screen the form was opened FROM, at the scroll position
+ *    it was left at -- rather than leaving the site. On Android Back is the primary way people
+ *    move around, so a screen change that pushes no entry ejects the person on the gesture they
+ *    use most.
+ *  - A screen's identity lives in the URL as a HASH route, so the URL changes as screens open
+ *    and a meal's own URL RELOADS to that meal.
+ *  - The first screen REPLACES its entry rather than pushing one, so Back from it leaves the
+ *    site rather than cycling inside the app. That is asserted as the entry count not growing
+ *    on the first render, rather than by trying to observe leaving.
+ *  - Signing out replaces the stack, so Back after signing out cannot walk into a screen
+ *    belonging to the account that just left.
  *
  * Bands are asserted by NAME and never by colour, and widgets are located tolerantly --
  * whether the grid is a table or a list, and how a cell is worded, are presentation
@@ -422,6 +434,23 @@ const openHistory = async (browser: Browser, account: Account): Promise<Page> =>
 };
 
 const grid = (page: Page): Locator => page.getByRole('region', { name: /history/i });
+
+/** The sign-in form: the one screen an account that has left may be looking at. */
+const signInForm = (page: Page): Locator => page.getByRole('button', { name: /sign in/i });
+
+/** How many entries the browser holds, which is how 'replaced rather than pushed' is read. */
+const historyLength = (page: Page): Promise<number> =>
+  page.evaluate(() => window.history.length);
+
+/** The hash route a screen publishes, '#history' or '#meal/<id>', without the origin. */
+const hashOf = (page: Page): string => new URL(page.url()).hash;
+
+/** Waits until the route settles on what the opened screen claims to be. */
+const expectRoute = async (page: Page, route: RegExp, what: string): Promise<void> => {
+  await expect
+    .poll(() => hashOf(page), { message: `the URL carries ${what}`, timeout: 5_000 })
+    .toMatch(route);
+};
 
 /** The grid's rows, whether it is marked up as a table or as a list. */
 const allRows = async (page: Page): Promise<Locator> => {
@@ -1124,5 +1153,151 @@ test("another account's grid holds none of the owner's readings", async ({ brows
     // stronger statement than counting digits, since day labels carry digits of their own.
     await expect(strangerRow.locator('[data-level-band]')).toHaveCount(0);
     await expect(strangerRow.locator('[data-change-band]')).toHaveCount(0);
+  }
+});
+
+// --- Back, the URL and the stack --------------------------------------------
+//
+// In-app navigation goes through the browser's history. On Android Back is the primary way
+// people move around, so an app that changes screen without pushing an entry ejects the person
+// on the gesture they use most: Back has nothing to pop but the previous website. These cases
+// drive the gesture itself rather than the controls.
+
+test("the device's Back returns to the grid, at the position it was left at, without leaving the site", async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+  await expectRoute(phone, /^#history/, 'the History route');
+  const origin = new URL(phone.url()).origin;
+
+  // Part-way down the ninety rows, which is where a person backfilling a paper log spends
+  // their time, and the place where being dumped at the top hurts most.
+  const deep = 45;
+  await (await labelOf(await rowFor(phone, deep))).scrollIntoViewIfNeeded();
+  await phone.waitForTimeout(100);
+  const scrolled = await scrollOffset(phone);
+  expect(scrolled, 'the grid really is scrolled away from its top').toBeGreaterThan(0);
+  const before = await rectOf(await labelOf(await rowFor(phone, deep)), `the row ${deep} days ago`);
+
+  // The same journey the Cancel case makes, left by the gesture instead of the control.
+  await (await controlIn(await cellAt(await rowFor(phone, deep), 2))).click();
+  await expect(phone.getByText(/new meal/i)).toBeVisible();
+  const entriesOnForm = await historyLength(phone);
+  expect(
+    entriesOnForm,
+    'opening a screen PUSHES an entry, or Back has nothing of this app to pop',
+  ).toBeGreaterThan(1);
+
+  await phone.goBack();
+  await expect(grid(phone), 'Back from a form opened in History returns to History').toBeVisible();
+  expect(
+    new URL(phone.url()).origin,
+    'Back moved inside the app rather than leaving the site',
+  ).toBe(origin);
+  await expectRoute(phone, /^#history/, 'the History route again');
+  await phone.waitForTimeout(150);
+
+  // And it restores the position, exactly as Cancel does: one way back, so the two cannot
+  // drift apart.
+  const after = await rectOf(
+    await labelOf(await rowFor(phone, deep)),
+    `the row ${deep} days ago after Back`,
+  );
+  expect(
+    Math.abs(after.y - before.y),
+    'the same day is in the same place on the screen as when the cell was tapped',
+  ).toBeLessThanOrEqual(8);
+  expect(
+    Math.abs((await scrollOffset(phone)) - scrolled),
+    'Back restores the remembered position rather than redrawing the grid at its top',
+  ).toBeLessThanOrEqual(8);
+
+  // The night screen is a different editor reached from a different column, and the gesture
+  // is the same one way back.
+  await (await controlIn(await cellAt(await rowFor(phone, 2), 0))).click();
+  await expect(phone.getByLabel('Bedtime glucose', { exact: true })).toBeVisible();
+  await phone.goBack();
+  await expect(grid(phone), 'Back from the night screen returns to History').toBeVisible();
+  await expect(
+    phone.getByRole('heading', { name: /^today$/i }),
+    'and not to Today, which is not where the person was',
+  ).toHaveCount(0);
+});
+
+test("a meal's own URL reloads to that meal, because the screen's identity is in the route", async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+  await expectRoute(phone, /^#history/, 'the History route');
+
+  // The two-days-ago breakfast, 104 to 186. Opening it must change the route: that is what
+  // makes a reload and a Back possible at all.
+  await (await controlIn(await cellAt(await rowFor(phone, 2), 1))).click();
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('104');
+  await expectRoute(phone, /^#meal\/.+/, "that meal's own route");
+  const mealUrl = phone.url();
+
+  // A hash route rather than a path because GitHub Pages serves static files, so this reload
+  // is also the assertion that the route survives being asked for cold.
+  await phone.reload();
+  await expect(
+    phone.getByLabel('Glucose before', { exact: true }),
+    'the meal URL reloads to that meal rather than to some default screen',
+  ).toHaveValue('104');
+  await expect(phone.getByLabel('Glucose after', { exact: true })).toHaveValue('186');
+  expect(phone.url(), 'and the URL is unchanged by the reload').toBe(mealUrl);
+});
+
+test('the first screen replaces its entry, so Back from it leaves the site', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: PHONE_VIEWPORT });
+  const phone = await context.newPage();
+
+  // A brand-new page holds exactly one entry, and the first navigation replaces it, so the
+  // count after the app's first render says whether that render pushed or replaced. If it
+  // pushed, Back from the first screen would cycle inside the app instead of leaving it, and
+  // the count would have grown.
+  const beforeFirstRender = await historyLength(phone);
+  await phone.goto(stack.siteUrl);
+  await expect(signInForm(phone), 'the first screen renders').toBeVisible();
+  expect(
+    await historyLength(phone),
+    'the first screen REPLACES the current entry rather than pushing one',
+  ).toBe(beforeFirstRender);
+
+  // It still carries a route of its own: replaced, not absent.
+  await expectRoute(phone, /^#.+/, 'a route for the first screen');
+});
+
+test('after signing out, Back cannot walk back into the account that just left', async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  // Deep enough in that there are entries behind this one for Back to find.
+  await (await controlIn(await cellAt(await rowFor(phone, 2), 1))).click();
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('104');
+  await phone.goBack();
+  await expect(grid(phone)).toBeVisible();
+
+  await phone.getByRole('button', { name: /^sign out$/i }).click();
+  await expect(signInForm(phone), 'signing out shows the sign-in screen').toBeVisible();
+
+  // Signing out REPLACES the stack, so the gesture cannot reveal a screen belonging to the
+  // account that left -- not the grid, and not that account's readings on a form.
+  await phone.goBack();
+  await expect(
+    signInForm(phone),
+    'Back after signing out stays on the sign-in screen',
+  ).toBeVisible();
+  await expect(grid(phone), "and never shows the signed-out account's grid").toHaveCount(0);
+  for (const label of ['Glucose before', 'Glucose after', 'Bedtime glucose']) {
+    await expect(
+      phone.getByLabel(label, { exact: true }),
+      `no data-entry control (${label}) is reachable after signing out`,
+    ).toHaveCount(0);
+  }
+  const body = await textOf(phone.locator('body'));
+  for (const reading of ['104', '186', '260', '190']) {
+    expect(body, `the ${reading} of the account that left is gone`).not.toContain(reading);
   }
 });
