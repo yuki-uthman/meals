@@ -1198,3 +1198,92 @@ Oracle target locator: `tests/acceptance/theme-and-width.spec.ts`
 Verification command: `npm run build`
 Verification command: `npm run test:acceptance -- tests/acceptance/theme-and-width.spec.ts`
 Verification command: `npm run test:acceptance`
+## Meal & Insulin Log product brief, value 14: a food is a record of its own
+
+### Purpose
+Stop making the person retype a food they have eaten before: a food becomes an owned record with a name and a type, Add food offers the ones already recorded as the name is typed, and a name that matches none offers to create it.
+
+### Constraints
+- The front end is a static bundle only; there is no server process.
+- Row-level security stays the only thing that scopes a read or a write; one account's foods may never reach another's.
+- The layout is fluid with no horizontal scrolling at any viewport width from 360 px upward.
+- Food types are the brief's seven; amount units are the brief's five.
+- No existing meal may lose or change what it says was eaten.
+- The app never recommends a dose, and it never recommends a food or an amount either.
+
+### Targets
+| Path | Decision | Reason |
+|---|---|---|
+| `supabase/migrations/0003_food_catalogue.sql` | CREATE_NEW | Create the owned foods table with its row-level security, link meal_foods to it, and backfill the catalogue from what has already been eaten so no existing meal changes. |
+| `src/domain/food-catalogue.ts` | CREATE_NEW | Name normalisation, matching a typed name against the catalogue, and deciding when a name is new, as pure functions. |
+| `src/ports/log-store.ts` | EXTEND | Add reading the account's foods and creating one. |
+| `src/adapters/supabase/log-store.ts` | EXTEND | Read and write foods through PostgREST, still with no user_id of its own. |
+| `src/ui/food-form.ts` | EXTEND | The name field offers matching foods, a chosen food fills its type, and a name matching none offers to create it. |
+| `src/ui/theme.css` | EXTEND | The match list and the create control, in both palettes. |
+| `src/main.ts` | EXTEND | Load the catalogue for the Add food screen and add a created food to it. |
+| `tests/acceptance/food-catalogue.spec.ts` | CREATE_NEW | The public oracle for this value. |
+
+### Paradigm
+functional
+
+### Decisions
+- A food is a row of its own: id, user_id defaulting to auth.uid() and referencing auth.users on delete cascade, name, food_type constrained to the brief's seven. Row-level security is enabled and the four owner policies are added, exactly as the three existing tables have them, and anon is revoked.
+- A food is unique per account on its NORMALISED name -- trimmed and lower-cased -- enforced by a unique index on (user_id, lower(btrim(name))). 'Oats' and 'oats ' are one food, because a catalogue that holds both has not saved anybody any typing.
+- meal_foods gains food_id referencing foods on delete SET NULL, and KEEPS its own name and food_type. Those two columns are the record of what was eaten at the time: renaming a food later must not rewrite what past meals say, and deleting a food must not delete history. The catalogue exists to stop retyping, not to become the source of truth for the past.
+- The migration backfills: one food per distinct normalised name the account has already eaten, taking the food_type of its most recent use, then sets food_id on every existing meal_foods row. No name, type or amount already recorded changes, so every delivered oracle keeps its meaning and the person's history survives intact.
+- As the name is typed, the person's foods whose normalised name CONTAINS the typed text are listed beneath the field, each naming the food and its type. Choosing one fills the name and takes its type, and the type chooser is not shown at all: the type is a property of the food, already answered.
+- When the typed name matches no food exactly, a control reading 'Create "Chicken rice"' appears. Pressing it marks the food as new and reveals the type chooser, because a food cannot enter the catalogue without a type. Nothing is created silently: a name that is one letter off an existing food must not quietly become a second entry.
+- A food is written to the catalogue when it is created, not when the meal is saved. 'A food created once never has to be typed again' has to hold even if the person then abandons the meal, and a food is harmless on its own.
+- The match list shows at most eight foods, most recently used first, because a list longer than a thumb-reach is a list nobody reads to the end of. Typing narrows it; an empty field shows the most recently used.
+- Value 6's sameness rule and value 10's lookup are untouched. Both work on the food's name, amount and unit, which the migration preserves exactly, so two meals that were the same before are the same after.
+
+### Reuse analysis
+| Symbol | Locator | Decision | Reason |
+|---|---|---|---|
+| FOOD_TYPES | `src/domain/entry.ts:8` | REUSE | The seven types are already a vocabulary the form and the draft share; the catalogue constrains itself to the same list. |
+| LogStore | `src/ports/log-store.ts:71` | EXTEND | Reading and creating foods belongs on the one boundary every other read and write goes through. |
+| foodForm | `src/ui/food-form.ts:1` | EXTEND | The same screen gains a match list and a create control; a second screen for choosing a food would divorce it from the amount and unit it is entered with. |
+| sameFoodsKey | `src/domain/meal-identity.ts:1` | REUSE | Unchanged on purpose: it reads name, amount and unit, all of which the migration preserves, so no delivered behaviour shifts under it. |
+
+### Prefactoring
+Existing oracle: `tests/acceptance/record-a-meal.spec.ts`
+
+Move: Before the catalogue exists, separate the Add food screen's NAME step from its amount and unit step, so the match list and the create control attach to one part rather than being threaded through the whole form.
+
+Preserved observation: A meal is still recorded with its foods, their types and their amounts, still shows on Today, and still reopens to take the after reading.
+
+### Agreement analysis
+| Contract | Role | Locator | Decision | Reason |
+|---|---|---|---|---|
+| meal_foods, its name and food_type columns and its row-level security | producer | `supabase/migrations/0001_owner_scoped_schema.sql:37` | UNCHANGED_COMPATIBLE | Both columns keep their meaning and their values. A nullable food_id is added beside them and backfilled, so every existing read returns exactly what it did before. |
+| The Add food screen's flow, as value 3 declared it | consumer | `tests/acceptance/record-a-meal.spec.ts:174` | INCOMPATIBLE | Value 3's oracle types a name and then chooses a type directly. A name that matches no food now needs the create control pressed first, because a food must not enter the catalogue silently. That oracle must be rebound to the new flow; the observation it protects -- a meal recorded with its foods, types and amounts -- does not change. |
+
+### Boundaries
+- Driving port: A person adding a food they have eaten before: type a few letters, pick it from the list, and give only the amount. Or a food they have never eaten: type it, create it once, and never type it again.
+- Driven port: The log-store port for reading the account's foods and creating one.
+- Driven port: The identity port, unchanged, for the session the reads and writes run as.
+- Dependency direction: Normalisation and matching are pure functions in src/domain over a list of foods already read. The screen is a pure function of a draft, that list and its handlers.
+- Failure: Condition: The catalogue cannot be read because the server is unreachable. | Outcome: Retry | Observation: The name field still works and the screen says 'Cannot reach the server. Try again.' above the list, with a usable retry control. Typing a name and creating it is still possible, because a convenience that failed to load must never block recording what was eaten.
+- Failure: Condition: A food is created whose normalised name already exists. | Outcome: Refusal | Observation: Nothing is written and the existing food is selected instead, with 'You already have that food.' The unique index refuses it at the row, so two entries for one food cannot exist even if two screens race.
+- Failure: Condition: A food is created with no type chosen. | Outcome: Refusal | Observation: The screen stays, shows 'Choose a type for this food.', and nothing is written.
+- Failure: Condition: A food in the catalogue is deleted while a past meal still names it. | Outcome: Indeterminate | Observation: The meal keeps its own name and type and its food_id becomes null. The history still reads exactly as it did; only the link to the catalogue is gone, which is why the meal carries its own copy.
+
+### Acceptance supports
+- `tests/support/local-stack.ts`
+- `tests/support/accounts.ts`
+
+### Public oracle
+Observation: In Add food, typing a name lists the person's own foods that match and lets one be chosen, which fills in its type; a name that matches nothing offers to create that food, and a food created once never has to be typed again.
+
+Stimulus: Account A already owns a meal containing Chicken rice of type Mixed dish 250 g, eaten three days ago, so that food is in its catalogue. Account B owns a food named Porridge. A browser at a 360 px viewport signs in as account A, opens New meal from an empty slot, opens Add food, and types 'chick'. It chooses the listed food, gives the amount 300 g, and adds it to the meal. It then opens Add food again and types 'Lentil soup', which matches nothing, presses the create control, chooses the type Mixed dish, gives 200 ml, and adds it. It opens Add food a third time and types 'lentil'. It then tries to create a food named 'CHICKEN RICE', and separately tries to create one with no type chosen.
+
+Expected: Typing 'chick' lists Chicken rice with its type Mixed dish, and choosing it fills the name and shows that type without asking for one. Typing 'Lentil soup' lists nothing and offers a control reading Create "Lentil soup"; pressing it reveals the type chooser. After that meal is saved, opening Add food and typing 'lentil' lists Lentil soup with type Mixed dish -- it was typed once and is now offered. Creating 'CHICKEN RICE' is refused with 'You already have that food.' and no second entry appears in the list. Creating with no type is refused with 'Choose a type for this food.' and nothing is written. Account B's list never contains Chicken rice or Lentil soup, and account A's never contains Porridge. The page never scrolls horizontally.
+
+Falsifier: A matching food is missing from the list or a non-matching one is listed, or choosing a food does not fill its name and type, or the type is still asked for after a food is chosen, or a name matching nothing offers no way to create it, or a created food is not offered the next time its first letters are typed, or a name differing only in case creates a second entry, or a food is created with no type, or either account sees the other's foods, or any existing meal's recorded food name, type or amount changes, or the document scrolls horizontally at a 360 px viewport.
+
+### Oracle and verification
+Oracle target locator: `tests/acceptance/food-catalogue.spec.ts`
+
+Verification command: `npm run build`
+Verification command: `npm run test:acceptance -- tests/acceptance/food-catalogue.spec.ts`
+Verification command: `npm run test:acceptance`
