@@ -162,11 +162,22 @@ const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: His
   const corner = element('th', 'history__corner');
   corner.setAttribute('scope', 'col');
   headRow.append(corner);
-  for (const header of historyHeaders(view)) {
-    const cell = element('th', 'history__header', header);
+  // The meal columns are drawn in upper case; the night column is not, and is set
+  // in small capitals instead, so it READS as one of the same headers while its
+  // rendered text stays the word the view chose. That word is what says which half
+  // of the night-and-morning pair is being shown -- 'Bedtime', 'Overnight',
+  // 'Night' -- and a CSS transform would make what a reader sees differ from what
+  // the domain produced, with 'Night' and 'Overnight' becoming indistinguishable
+  // to anything reading the header back.
+  historyHeaders(view).forEach((header, index) => {
+    const cell = element(
+      'th',
+      index === 0 ? 'history__header history__header--night' : 'history__header',
+      header,
+    );
     cell.setAttribute('scope', 'col');
     headRow.append(cell);
-  }
+  });
   head.append(headRow);
   table.append(head);
 

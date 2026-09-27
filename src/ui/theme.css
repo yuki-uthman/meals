@@ -1177,10 +1177,33 @@ label {
   z-index: 2;
   background: var(--canvas);
   padding: var(--space-1);
-  color: var(--ink-muted);
   font-size: 0.6875rem;
-  font-weight: 600;
   text-align: center;
+  /* The rule beneath the header row: what separates the headers from the ninety
+     rows that pass underneath them. */
+  border-bottom: 1px solid var(--line);
+}
+
+/* These headers anchor the whole grid and hold the top of its scrolling area, so
+   they must not be the quietest thing on the screen. Stated on every axis a
+   reader actually notices -- the INK colour rather than the muted ink the day
+   labels use, weight 700, upper case and letter-spaced -- because 'more
+   prominent' read as one step of font weight with the colour left muted was
+   indistinguishable from the dates below. */
+.history__header {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The night column, which says which half of the night-and-morning pair is being
+   shown. It is set in small capitals rather than transformed, so it reads as one
+   of the same headers while the word itself stays exactly what the view chose:
+   'Night' transformed would be indistinguishable from 'Overnight' transformed. */
+.history__header--night {
+  text-transform: none;
+  font-variant-caps: all-small-caps;
 }
 
 .history__corner {
