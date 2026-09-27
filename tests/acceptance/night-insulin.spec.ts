@@ -75,7 +75,11 @@ const nights = [
   { daysAgo: 2, units: 18, morning: '106', band: 'in-range' },
   { daysAgo: 3, units: 16, morning: '190', band: 'high' },
   { daysAgo: 4, units: 16, morning: '64', band: 'low' },
-  { daysAgo: 5, units: 20, morning: '260', band: 'very-high' },
+  // 260 is 'high', the SAME band as 190 two rows up. The level bands changed after the
+  // user worked the History grid -- low under 70, in-range 70 to 140, elevated 141 to 180,
+  // high 181 and above -- so the old 250 boundary and the 'very-high' band above it are
+  // both gone. Two rows sharing a band is the point of this pair, not a duplication.
+  { daysAgo: 5, units: 20, morning: '260', band: 'high' },
 ] as const;
 
 /**
