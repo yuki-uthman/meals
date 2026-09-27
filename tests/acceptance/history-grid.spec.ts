@@ -41,6 +41,14 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    with nothing in them, which a grid bounded by existing data could never reach.
  *  - Over that span the short label 'Tue 22' is ambiguous three times over, so the rows
  *    carry a month separator naming each month the grid reaches.
+ *  - Every way of leaving a form or the night screen returns to the screen it was opened
+ *    FROM, so a cell tapped in History leads back to History rather than to Today, and it
+ *    returns to the SAME SCROLL POSITION: coming back to the top of ninety rows is barely
+ *    better than being dumped on Today.
+ *  - The bottom navigation is FIXED to the bottom of the viewport and holds its place while
+ *    the grid scrolls underneath, and the scrolling content reserves room for it, so the last
+ *    day row and a form's lowest control clear the bar instead of sitting behind it -- the
+ *    classic fixed-bar failure, and invisible to anyone testing on a desktop window.
  *  - A slot cell with a meal behind it opens that meal's EDIT form, which is where the after
  *    reading taken two hours later gets added; a night cell opens the night screen for that
  *    night.
@@ -334,6 +342,54 @@ const textOf = async (locator: Locator): Promise<string> =>
 
 /** U+2212 and friends normalised to a plain hyphen, so a signed change can be matched. */
 const normaliseSigns = (text: string): string => text.replace(/[−–—]/g, '-');
+
+/**
+ * How far anything on the page is scrolled. Which element carries the scrollbar -- the
+ * document or a scrolling area inside the frame -- is a presentation choice, so the largest
+ * offset of any scrollable element is taken: what is asserted is that the grid is scrolled
+ * away from its top, not which node does the scrolling.
+ */
+const scrollOffset = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    let furthest = 0;
+    for (const node of [document.scrollingElement, ...document.querySelectorAll('*')]) {
+      if (node instanceof HTMLElement || node === document.scrollingElement) {
+        const element = node as Element;
+        if (element.scrollHeight > element.clientHeight + 1) {
+          furthest = Math.max(furthest, element.scrollTop);
+        }
+      }
+    }
+    return furthest;
+  });
+
+/** Scrolls whatever scrolls to its very end, which is where a fixed bottom bar does its damage. */
+const scrollToEnd = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    for (const node of [document.scrollingElement, ...document.querySelectorAll('*')]) {
+      const element = node as Element | null;
+      if (element !== null && element.scrollHeight > element.clientHeight + 1) {
+        element.scrollTop = element.scrollHeight;
+      }
+    }
+  });
+  // One frame, so the fixed bar and the reserved room are measured after the scroll settles.
+  await page.waitForTimeout(100);
+};
+
+type Rect = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+
+const rectOf = async (locator: Locator, what: string): Promise<Rect> => {
+  const box = await locator.boundingBox();
+  if (box === null) throw new Error(`${what} has no box on screen`);
+  return box;
+};
+
+const viewportHeight = (page: Page): number => {
+  const size = page.viewportSize();
+  if (size === null) throw new Error('the page has no viewport');
+  return size.height;
+};
 
 const scrollsHorizontally = (page: Page): Promise<boolean> =>
   page.evaluate(() => {
@@ -889,6 +945,150 @@ test('an empty cell is where a day kept on paper gets filled in', async ({ brows
   );
 
   expect(await scrollsHorizontally(phone), 'filling in a cell never widens the page').toBe(false);
+});
+
+test('leaving a form opened from a cell returns to the grid, not to Today', async ({ browser }) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  // A slot cell leads to the edit form; Cancel is 'every other way of leaving' it, and it
+  // must lead BACK to the grid the cell was tapped in. Sending it to Today would throw away
+  // where the person was, which is worst exactly where it matters most: part-way down ninety
+  // rows of somebody else's handwriting being copied in.
+  const breakfast = await cellAt(await rowFor(phone, 2), 1);
+  await (await controlIn(breakfast)).click();
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toBeVisible();
+
+  await phone.getByRole('button', { name: /^cancel$/i }).click();
+  await expect(grid(phone), 'cancelling an edit opened from a cell returns to History').toBeVisible();
+  await expect(
+    phone.getByRole('heading', { name: /^today$/i }),
+    'and not to Today, which is not where the person was',
+  ).toHaveCount(0);
+
+  // An empty slot cell leads to New meal, and the same holds: nothing was recorded, and the
+  // grid being backfilled is still what the person is in the middle of.
+  const emptyDinner = await cellAt(await rowFor(phone, 6), 3);
+  await (await controlIn(emptyDinner)).click();
+  await expect(phone.getByText(/new meal/i)).toBeVisible();
+  await phone.getByRole('button', { name: /^cancel$/i }).click();
+  await expect(grid(phone), 'cancelling a backfill returns to History').toBeVisible();
+
+  // And the night screen, which is a different editor reached from a different column.
+  const night = await cellAt(await rowFor(phone, 2), 0);
+  await (await controlIn(night)).click();
+  await expect(phone.getByLabel('Bedtime glucose', { exact: true })).toBeVisible();
+  await phone.getByRole('button', { name: /^cancel$/i }).click();
+  await expect(grid(phone), 'leaving the night screen returns to History').toBeVisible();
+  await expect(
+    phone.getByRole('heading', { name: /^today$/i }),
+    'the night screen came from History and goes back to it',
+  ).toHaveCount(0);
+});
+
+test('returning to the grid returns to the same scroll position', async ({ browser }) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  // Part-way down the ninety rows, which is where a person backfilling a paper log spends
+  // their time. The row is identified by its own accessible name, so what is measured is a
+  // known date rather than 'whatever is on screen'.
+  const deep = 45;
+  const label = await labelOf(await rowFor(phone, deep));
+  await label.scrollIntoViewIfNeeded();
+  await phone.waitForTimeout(100);
+
+  const scrolled = await scrollOffset(phone);
+  expect(scrolled, 'the grid really is scrolled away from its top').toBeGreaterThan(0);
+  const before = await rectOf(label, `the row ${deep} days ago`);
+
+  // Leave through a cell and come straight back. Coming back to the top of ninety rows after
+  // cancelling is barely better than being dumped on Today: the point of going back is to
+  // carry on where you were.
+  await (await controlIn(await cellAt(await rowFor(phone, deep), 2))).click();
+  await expect(phone.getByText(/new meal/i)).toBeVisible();
+  await phone.getByRole('button', { name: /^cancel$/i }).click();
+  await expect(grid(phone)).toBeVisible();
+  await phone.waitForTimeout(150);
+
+  const after = await rectOf(
+    await labelOf(await rowFor(phone, deep)),
+    `the row ${deep} days ago on returning`,
+  );
+  expect(
+    Math.abs(after.y - before.y),
+    'the same day is in the same place on the screen as it was when the cell was tapped',
+  ).toBeLessThanOrEqual(8);
+  expect(
+    Math.abs((await scrollOffset(phone)) - scrolled),
+    'the remembered position is restored rather than the grid being redrawn at its top',
+  ).toBeLessThanOrEqual(8);
+});
+
+test('the bottom navigation holds its place and the grid reserves room for it', async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+  const height = viewportHeight(phone);
+
+  const atRest = await rectOf(navigation(phone), 'the bottom navigation');
+  expect(
+    atRest.y + atRest.height,
+    'the navigation sits at the bottom of the viewport, the way an Android bar does',
+  ).toBeGreaterThanOrEqual(height - 2);
+
+  await scrollToEnd(phone);
+  expect(await scrollOffset(phone), 'ninety rows do scroll').toBeGreaterThan(0);
+
+  const scrolledTo = await rectOf(navigation(phone), 'the bottom navigation after scrolling');
+  expect(
+    Math.abs(scrolledTo.y - atRest.y),
+    'the navigation is FIXED: it holds its place while the grid scrolls underneath',
+  ).toBeLessThanOrEqual(1);
+
+  // The classic failure of a fixed bottom bar: the last row of the grid sits behind it,
+  // visible but untappable, and invisible to anyone testing on a desktop window. The
+  // scrolling area must reserve the bar's height, so the last day of the ninety clears it.
+  const lastRow = (await dayRows(phone)).last();
+  const last = await rectOf(lastRow, 'the last day row');
+  expect(
+    last.y + last.height,
+    'scrolled to the end, the last day row clears the fixed navigation rather than hiding behind it',
+  ).toBeLessThanOrEqual(scrolledTo.y + 1);
+
+  // Its cells are reachable, not merely drawn: a row behind the bar can be seen and not used.
+  const lastCell = await cellAt(lastRow, 3);
+  const opener = await controlIn(lastCell);
+  await opener.click();
+  await expect(
+    phone.getByText(/new meal/i),
+    'the last row of the grid can actually be tapped',
+  ).toBeVisible();
+
+  // And a form opened from the grid reserves the same room: its last control must clear the
+  // bar it keeps, or the way to save a backfilled meal is the thing hidden.
+  await scrollToEnd(phone);
+  const formNav = await rectOf(navigation(phone), 'the navigation on a form opened from History');
+  expect(
+    formNav.y + formNav.height,
+    'the navigation is fixed on the form too',
+  ).toBeGreaterThanOrEqual(height - 2);
+  // The bottom-most control the form offers, whichever it happens to be: what matters is
+  // that nothing a person has to reach ends up under the bar.
+  const lowestControl = await phone.evaluate(() => {
+    const content = document.querySelector('main') ?? document.body;
+    let lowest = 0;
+    for (const node of content.querySelectorAll('button, input, select, textarea, a[href]')) {
+      const box = node.getBoundingClientRect();
+      if (box.width > 0 && box.height > 0) lowest = Math.max(lowest, box.bottom);
+    }
+    return lowest;
+  });
+  expect(lowestControl, 'the form does offer controls').toBeGreaterThan(0);
+  expect(
+    lowestControl,
+    'the form reserves room for the bar, so its lowest control is not left behind it',
+  ).toBeLessThanOrEqual(formNav.y + 1);
+
+  expect(await scrollsHorizontally(phone), 'reserving room never widens the page').toBe(false);
 });
 
 test("another account's grid holds none of the owner's readings", async ({ browser }) => {
