@@ -2,9 +2,11 @@ import {
   EXERCISE_CONTEXTS,
   exerciseContextLabel,
   foodTypeLabel,
+  localToday,
   MEAL_SLOTS,
   slotLabel,
   type ExerciseContext,
+  type IsoDate,
   type MealSlot,
 } from '../domain/entry';
 import {
@@ -302,6 +304,23 @@ export type MealFormHandlers = {
 export const mealFormTitle = (draft: MealDraft): string =>
   draft.mealId === null ? 'New meal' : 'Edit meal';
 
+/**
+ * The date this meal is being recorded against, said in full, and only when it is
+ * not today: a meal backfilled from a History cell must never be mistakable for
+ * today's. On today it is left unsaid, because saying it would be noise on the form
+ * a person fills in several times a day.
+ */
+const recordingDateText = (date: IsoDate): string | null => {
+  if (date === localToday()) return null;
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  const at = new Date(year, month - 1, day);
+  return `Recording against ${at.toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  })}`;
+};
+
 const foodMeasure = (food: FoodDraft): string =>
   food.amount.trim() === '' ? '' : ` · ${food.amount.trim()} ${food.unit}`;
 
@@ -457,6 +476,16 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
   // A repeat names the meal it took its foods from, so a person cannot lose track
   // of what they are logging again. It is a statement about this form, not a
   // recorded value, so it carries no data-entry mark.
+  // The date being recorded, whenever it is not today. It is a statement about
+  // this form rather than a recorded value, so it carries no data-entry mark.
+  const recordingDate = recordingDateText(draft.date);
+  if (recordingDate !== null) {
+    const line = document.createElement('p');
+    line.className = 'form__recording-date';
+    line.textContent = recordingDate;
+    screen.append(line);
+  }
+
   const copiedFrom = draft.copiedFrom ?? null;
   if (copiedFrom !== null) {
     const source = document.createElement('p');

@@ -85,15 +85,17 @@ export const historyHeaders = (view: HistoryView): readonly string[] => [
 // --------------------------------------------------- how far back a grid runs
 
 /**
- * There are no periods. The grid runs from today back to the EARLIEST recorded
- * entry and the page scrolls, so going further back is scrolling rather than
- * finding a chip before older days will appear.
+ * There are no periods. The grid runs from today back to whichever is EARLIER --
+ * ninety days ago, or the oldest recorded entry -- and the page scrolls, so going
+ * further back is scrolling rather than finding a chip before older days appear.
  *
- * The floor: a log with one entry still reads as a grid rather than as a single
- * stranded row. There is no ceiling beyond the earliest entry, so scrolling
- * stops where the record starts rather than running into an infinite empty past.
+ * Ninety days is the FLOOR because backfilling is the point: the days worth
+ * filling in are by definition days with nothing in them, so a grid bounded by
+ * existing data could never reach them. Scrolling stops at the floor, or at the
+ * oldest entry when the record runs back further, rather than running into an
+ * unbounded empty past.
  */
-export const HISTORY_ROW_FLOOR = 14;
+export const HISTORY_ROW_FLOOR = 90;
 
 /**
  * The date the grid's one read starts from: before any entry can exist, so the
@@ -136,7 +138,11 @@ export const historyDates = (today: IsoDate, window: HistoryWindow): readonly Is
 
 // -------------------------------------------------------------------- cells
 
-/** What a populated cell opens. A cell with nothing behind it opens nothing. */
+/**
+ * What a cell opens. EVERY cell opens something: a cell with nothing behind it is
+ * where a day kept on paper gets filled in, and an untappable empty cell would
+ * make the one screen that shows a missing day the one screen that cannot fill it.
+ */
 export type CellTarget =
   /**
    * The meal's own row, and the date it was eaten on. The date travels with the
@@ -146,7 +152,13 @@ export type CellTarget =
    */
   | { readonly kind: 'meal'; readonly id: string; readonly eatenOn: IsoDate }
   /** The night record's own date, which is the day BEFORE the row it appears in. */
-  | { readonly kind: 'night'; readonly nightOn: IsoDate };
+  | { readonly kind: 'night'; readonly nightOn: IsoDate }
+  /**
+   * A new entry for that date and that slot: what an empty slot cell opens, with
+   * both already chosen, so saving records against the cell's own date rather than
+   * against today.
+   */
+  | { readonly kind: 'new-meal'; readonly date: IsoDate; readonly slot: MealSlot };
 
 export type FilledCell = {
   readonly kind: 'filled';
@@ -160,17 +172,36 @@ export type FilledCell = {
   readonly target: CellTarget;
 };
 
-/** Nothing behind it: an empty outline, no band, no digits and nothing to tap. */
-export type EmptyCell = { readonly kind: 'empty' };
+/**
+ * Nothing behind it: an empty outline carrying no band and no digits. It is still
+ * a control, and what it opens is a new entry for that date and that column, which
+ * is the whole reason History exists for somebody who has kept this log on paper.
+ */
+export type EmptyCell = {
+  readonly kind: 'empty';
+  /** Its day and its column in words, because a blank square says nothing. */
+  readonly name: string;
+  readonly target: CellTarget;
+};
 
 export type HistoryCell = FilledCell | EmptyCell;
 
-const EMPTY: EmptyCell = { kind: 'empty' };
-
 export type HistoryRow = {
   readonly date: IsoDate;
-  /** The short day label, 'Tue 22', which is what says which date this row is. */
+  /** The short day label, 'Tue 22', which is what the 360 px grid has room for. */
   readonly label: string;
+  /**
+   * The same date said unambiguously, 'Thursday 25 September': over ninety days the
+   * short label repeats three times, so this is what identifies one row rather than
+   * its two namesakes a month apart, and it is the row's accessible name.
+   */
+  readonly spokenLabel: string;
+  /**
+   * The month this row begins, named, or null in the middle of one. Without it a
+   * person scrolling back to a particular week cannot tell which of three months
+   * with a 'Tue 22' in them they are looking at.
+   */
+  readonly monthLabel: string | null;
   /** Exactly four: the night, then breakfast, lunch and dinner. */
   readonly cells: readonly HistoryCell[];
 };
@@ -179,6 +210,64 @@ const reading = (value: number): string => String(Math.round(value));
 
 const named = (label: string, column: string, readings: readonly string[]): string =>
   `${label} ${column} ${readings.join(' to ')}`;
+
+/**
+ * Deliberately not toLocaleDateString: a row's spoken date is part of what the
+ * grid is judged on -- it is how one day is named -- so it is built from a fixed
+ * vocabulary rather than from whatever the runtime's locale data happens to say.
+ */
+const LONG_WEEKDAYS: readonly string[] = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+const LONG_MONTHS: readonly string[] = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+const localDate = (date: IsoDate): Date => {
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  return new Date(year, month - 1, day);
+};
+
+/** 'Thursday 25 September': the row's accessible name, never its visible text. */
+export const spokenHistoryDate = (date: IsoDate): string => {
+  const at = localDate(date);
+  return `${LONG_WEEKDAYS[at.getDay()]} ${at.getDate()} ${LONG_MONTHS[at.getMonth()]}`;
+};
+
+/**
+ * 'September': what a month separator says. The month alone follows the reader's
+ * own locale, because nothing is matched on it beyond the month it names.
+ */
+export const historyMonthLabel = (date: IsoDate): string =>
+  localDate(date).toLocaleDateString(undefined, { month: 'long' });
+
+/** Its day and its column, and that there is nothing in it yet. */
+const emptyName = (label: string, column: string): string =>
+  `${label} ${column} nothing recorded`;
+
+const empty = (label: string, column: string, target: CellTarget): EmptyCell => ({
+  kind: 'empty',
+  name: emptyName(label, column),
+  target,
+});
 
 const byTimeAscending = (a: RecentMeal, b: RecentMeal): number =>
   a.eatenAt.getTime() - b.eatenAt.getTime();
@@ -193,17 +282,27 @@ const mealIn = (
 
 const mealCell = (
   meal: RecentMeal | undefined,
+  date: IsoDate,
+  slot: MealSlot,
   label: string,
   column: string,
   view: HistoryView,
 ): HistoryCell => {
-  if (meal === undefined) return EMPTY;
+  // Nothing behind it opens a NEW meal for this date and this slot, both already
+  // chosen: the empty cell is where a day kept on paper gets filled in.
+  const fillIn = (): EmptyCell => empty(label, column, { kind: 'new-meal', date, slot });
+
+  if (meal === undefined) return fillIn();
   const before = meal.glucoseBefore;
   const after = meal.glucoseAfter;
   const target: CellTarget = { kind: 'meal', id: meal.id, eatenOn: meal.eatenOn };
 
+  // A meal that is recorded but has no reading to show in this view is still an
+  // entry, so its empty cell opens THAT meal rather than offering a second one.
+  const nothingToShow = (): EmptyCell => empty(label, column, target);
+
   if (view === 'before') {
-    if (before === null) return EMPTY;
+    if (before === null) return nothingToShow();
     const readings = [reading(before)];
     return {
       kind: 'filled',
@@ -217,7 +316,7 @@ const mealCell = (
 
   // No after reading means no change exists, so Change and Both are empty. A
   // missing measurement is never drawn as a change of zero.
-  if (before === null || after === null) return EMPTY;
+  if (before === null || after === null) return nothingToShow();
   const change = after - before;
   const readings = view === 'change' ? [changeText(change)] : [reading(before), reading(after)];
   return {
@@ -240,13 +339,17 @@ const nightCell = (
   // The night that led INTO this date is the night record dated the day before it.
   const nightOn = shiftDate(date, -1);
   const night = window.nights.find((candidate) => candidate.nightOn === nightOn);
-  if (night === undefined) return EMPTY;
+  const target: CellTarget = { kind: 'night', nightOn };
+  // Empty or not, a night cell opens the night screen for ITS OWN night, which is
+  // that record's own editor and, where there is no record, where one is filled in.
+  const nothingToShow = (): EmptyCell => empty(label, column, target);
+
+  if (night === undefined) return nothingToShow();
 
   const bedtime = night.bedtimeGlucose;
-  const target: CellTarget = { kind: 'night', nightOn };
 
   if (view === 'before') {
-    if (bedtime === null) return EMPTY;
+    if (bedtime === null) return nothingToShow();
     const readings = [reading(bedtime)];
     return {
       kind: 'filled',
@@ -261,7 +364,7 @@ const nightCell = (
   // The morning reading is the one value 4 derives: the earliest before reading
   // on the row's OWN date. Nobody measured means no change, not a change of zero.
   const morning = morningReading(window.meals, date);
-  if (bedtime === null || morning === null) return EMPTY;
+  if (bedtime === null || morning === null) return nothingToShow();
   const change = morning - bedtime;
   const readings = view === 'change' ? [changeText(change)] : [reading(bedtime), reading(morning)];
   return {
@@ -281,15 +384,24 @@ export const historyRows = (
   view: HistoryView,
 ): readonly HistoryRow[] => {
   const nightColumn = nightColumnHeader(view);
+  // Where each month the grid reaches begins, read down the rows as they are shown:
+  // the label goes on the first row of each month rather than on a fixed set of
+  // twelve, so the separator marks THIS span and nothing wider.
+  let previousMonth: string | null = null;
   return dates.map((date): HistoryRow => {
     const label = shortNightDate(date);
+    const month = historyMonthLabel(date);
+    const monthLabel = month === previousMonth ? null : month;
+    previousMonth = month;
     return {
       date,
       label,
+      spokenLabel: spokenHistoryDate(date),
+      monthLabel,
       cells: [
         nightCell(window, date, label, nightColumn, view),
         ...HISTORY_SLOTS.map((slot) =>
-          mealCell(mealIn(window.meals, date, slot), label, slotLabel(slot), view),
+          mealCell(mealIn(window.meals, date, slot), date, slot, label, slotLabel(slot), view),
         ),
       ],
     };

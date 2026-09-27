@@ -5,6 +5,7 @@ import {
   historyViewLabel,
   HISTORY_VIEWS,
   type CellTarget,
+  type EmptyCell,
   type FilledCell,
   type HistoryRow,
   type HistoryView,
@@ -20,8 +21,12 @@ import {
 // only and Change and Both publish change bands only, so the brief's rule is
 // stated where it can be read back rather than hidden in a palette.
 //
-// A cell with nothing behind it is an empty outline: no band, no digits and no
-// control, because a cell that opens nothing must not be offered as one.
+// A cell with nothing behind it is an empty outline carrying no band and no
+// digits, and it IS a control: it opens a new entry for that date and that slot,
+// because backfilling a day kept on paper is the reason this screen exists, and an
+// untappable empty cell would make the one screen that shows a missing day the one
+// screen that cannot fill it. Its accessible name still says which day and which
+// column it belongs to, since there is nothing in it to read.
 
 export type HistoryState =
   | { readonly kind: 'loading' }
@@ -103,6 +108,34 @@ const filledCell = (cell: FilledCell, handlers: HistoryHandlers): HTMLElement =>
   return control;
 };
 
+/**
+ * An empty cell: the same control with no band, no digits and a dashed outline.
+ * The name is the only thing it can be read by, so it carries one.
+ */
+const emptyCell = (cell: EmptyCell, handlers: HistoryHandlers): HTMLElement => {
+  const control = document.createElement('button');
+  control.className = 'history__tap history__tap--empty';
+  control.type = 'button';
+  control.setAttribute('aria-label', cell.name);
+  control.addEventListener('click', () => handlers.onOpen(cell.target));
+  return control;
+};
+
+/**
+ * The month a row begins, named across the grid. Over ninety days the short label
+ * 'Tue 22' is ambiguous three times over, so this is what tells a person scrolling
+ * back which month they have reached.
+ */
+const monthSeparator = (month: string, columns: number): HTMLElement => {
+  const line = document.createElement('tr');
+  line.className = 'history__month';
+  const cell = element('th', 'history__month-name', month);
+  cell.setAttribute('scope', 'row');
+  cell.colSpan = columns;
+  line.append(cell);
+  return line;
+};
+
 const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: HistoryHandlers): HTMLElement => {
   const table = document.createElement('table');
   table.className = 'history__grid';
@@ -124,14 +157,21 @@ const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: His
 
   const body = document.createElement('tbody');
   for (const row of rows) {
+    if (row.monthLabel !== null) {
+      // The day label plus the four columns: the separator spans the whole grid.
+      body.append(monthSeparator(row.monthLabel, 5));
+    }
     const line = document.createElement('tr');
     line.className = 'history__row';
     const label = element('th', 'history__day', row.label);
     label.setAttribute('scope', 'row');
+    // Seen short, because that is what 360 px has room for, and spoken in full,
+    // because 'Thu 25' names three days over the span the grid reaches.
+    label.setAttribute('aria-label', row.spokenLabel);
     line.append(label);
     for (const cell of row.cells) {
-      const slot = element('td', cell.kind === 'empty' ? 'history__cell history__cell--empty' : 'history__cell');
-      if (cell.kind === 'filled') slot.append(filledCell(cell, handlers));
+      const slot = element('td', 'history__cell');
+      slot.append(cell.kind === 'filled' ? filledCell(cell, handlers) : emptyCell(cell, handlers));
       line.append(slot);
     }
     body.append(line);
@@ -169,13 +209,14 @@ export const historyScreen = (
 ): HTMLElement => {
   const screen = element('div', 'history-screen');
   // The view and nothing else: there is no period control, because the grid runs
-  // back to the earliest recorded entry and going further back is scrolling.
+  // back to ninety days or the earliest recorded entry, whichever is earlier, and
+  // going further back is scrolling.
   screen.append(viewChooser(view.view, handlers));
 
   if (view.state.kind === 'loading') {
     // Deliberately no grid while the read is in flight: a page of empty outlines
-    // would read as a fortnight with nothing recorded rather than as one not yet
-    // read.
+    // would read as ninety days with nothing recorded rather than as a record not
+    // yet read.
     screen.append(element('p', 'history__waiting', 'Loading…'));
     return screen;
   }

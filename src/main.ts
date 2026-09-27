@@ -371,6 +371,13 @@ const start = (): void => {
               void editMealFromHistory(target.id, target.eatenOn);
               return;
             }
+            if (target.kind === 'new-meal') {
+              // An empty slot cell opens New meal with that DATE and that SLOT
+              // already chosen, so saving records against the date the cell named
+              // rather than against today: backfilling is what History is for.
+              void newMealFromHistory(target.date, target.slot);
+              return;
+            }
             void openNightFor(target.nightOn);
           },
           onRetry: () => void loadHistory(),
@@ -686,6 +693,32 @@ const start = (): void => {
     // The meal's id travels with the draft, so adding the after reading later
     // updates this row rather than writing a second meal on the date.
     mealDraft = mealDraftFrom(found.meal, eatenOn);
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
+    formSection = 'history';
+    screen = 'meal';
+    render();
+  };
+
+  /**
+   * A new meal for the DATE and SLOT an empty History cell named. The date being
+   * read moves with it, because a meal is recorded against the date the frame is
+   * on, so a day kept on paper is filled in where it belongs rather than landing
+   * on today. The form is opened from the grid, so it keeps History's navigation.
+   */
+  const newMealFromHistory = async (eatenOn: IsoDate, slot: MealSlot): Promise<void> => {
+    if (!(await loadRecentMeals(eatenOn))) return;
+    if (!(await loadMealHistory())) return;
+
+    readToken += 1;
+    date = eatenOn;
+    clearDetail();
+    // No meal id: this is a new entry, and saving writes a row on that date.
+    mealDraft = newMealDraft(eatenOn, slot);
     foodDraft = null;
     nightDraft = null;
     nightHistory = null;
