@@ -20,6 +20,11 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  * amounts were written, that the dose and the before reading were written, and that the
  * edit updated one row instead of writing a second.
  *
+ * Adding a food takes one step more than it once did: a food is not created as a side
+ * effect of saving a meal, so a name the person has never eaten is typed, the offer
+ * reading 'Create "<name>"' is pressed, and only then is the type asked for. That gate
+ * is the single change to this flow; everything else this oracle judges is unchanged.
+ *
  * Every field is located by its EXACT label -- 'Slot', 'Time', 'Glucose before',
  * 'Rapid-acting units', 'Exercise', 'Note', 'Glucose after' on the meal form and 'Food
  * name', 'Type', 'Amount', 'Unit' on the Add food screen -- 'Food name' and not 'Food',
@@ -153,13 +158,28 @@ type Food = {
 };
 
 /**
- * Adds one food through the Add food screen: name, a type from the fixed list, an
- * amount and a unit. A food must have a type, so the type is always chosen.
+ * Adds one food the person has NEVER eaten through the Add food screen: the name is
+ * typed, the offer reading 'Create "<name>"' is pressed, and the type is then chosen,
+ * followed by an amount and a unit.
+ *
+ * The create step is not ceremony this oracle could skip. A food must not enter the
+ * catalogue as a side effect of saving a meal, so the type is asked for only once the
+ * person has said this name is a food of theirs -- which means an oracle that filled
+ * the name and reached straight for 'Type' would find no such control on a correct
+ * product. A food the person HAS eaten is chosen from the offers instead and asks for
+ * no type at all; this value's meals are all first-time foods, so every one is created.
  */
+const createFood = (name: string): string => `Create "${name}"`;
+
 const addFood = async (page: Page, food: Food): Promise<void> => {
   await page.getByRole('button', { name: /add food/i }).click();
 
   await page.getByLabel('Food name', { exact: true }).fill(food.name);
+
+  // Nothing becomes a food on its own: this press is what asks for one, and it is
+  // what reveals the type chooser below.
+  await page.getByRole('button', { name: createFood(food.name), exact: true }).click();
+
   await chooseOption(page, food.type);
   await page.getByLabel('Amount', { exact: true }).fill(food.amount);
   await chooseOption(page, food.unit);
