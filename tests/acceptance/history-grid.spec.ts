@@ -391,6 +391,57 @@ const scrollToEnd = async (page: Page): Promise<void> => {
   await page.waitForTimeout(100);
 };
 
+/**
+ * The element that actually carries the grid's scrollbar. On this screen the page itself does
+ * not scroll -- the rows scroll inside their own container -- so a window-level scroll is a
+ * no-op here, and anything asserted after one would be satisfied or broken silently. Every
+ * scroll below therefore targets THIS element and reports how far it moved, so a scroll that
+ * did nothing can never be mistaken for the thing being tested.
+ */
+const scrollGrid = async (
+  page: Page,
+  target: number | 'end',
+): Promise<{ readonly from: number; readonly to: number }> => {
+  const moved = await grid(page).evaluate((region, to) => {
+    const scrollable = (node: Element): boolean => node.scrollHeight > node.clientHeight + 1;
+    const scroller = ((): Element | null => {
+      for (let node: Element | null = region; node !== null; node = node.parentElement) {
+        if (scrollable(node)) return node;
+      }
+      for (const node of region.querySelectorAll('*')) {
+        if (scrollable(node)) return node;
+      }
+      return null;
+    })();
+    if (scroller === null) return null;
+    const from = scroller.scrollTop;
+    scroller.scrollTop = to === 'end' ? scroller.scrollHeight : to;
+    return { from, to: scroller.scrollTop };
+  }, target);
+  if (moved === null) throw new Error("the grid exposes no scrolling container");
+  // One frame, so positions are read after the scroll settles.
+  await page.waitForTimeout(100);
+  return moved;
+};
+
+/** Brings one row of the grid to the top of that container, leaving room to scroll onward. */
+const scrollGridToTopOf = async (page: Page, what: Locator): Promise<void> => {
+  const offset = await what.evaluate((node) => {
+    const scrollable = (candidate: Element): boolean =>
+      candidate.scrollHeight > candidate.clientHeight + 1;
+    let scroller: Element | null = null;
+    for (let walk: Element | null = node; walk !== null; walk = walk.parentElement) {
+      if (scrollable(walk)) {
+        scroller = walk;
+        break;
+      }
+    }
+    if (scroller === null) return 0;
+    return scroller.scrollTop + node.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  });
+  await scrollGrid(page, offset);
+};
+
 type Rect = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 
 const rectOf = async (locator: Locator, what: string): Promise<Rect> => {
@@ -1210,16 +1261,18 @@ test('a month separator is a landmark, told apart from the day labels it sits am
 }) => {
   const phone = await openHistory(browser, accounts.owner);
 
-  // The month the grid reaches back into, which is a separator somewhere down the ninety rows
-  // rather than at the top. A month rendered like the dates is one more line of the same grey
-  // doing nothing, and a landmark you cannot pick out is not one.
+  // A month rendered like the dates is one more line of the same grey doing nothing, and a
+  // landmark you cannot pick out is not one.
+  //
+  // The separator taken is the CURRENT month's separator, which sits near the TOP of the newest-first grid. The
+  // oldest month's sits near the bottom, where there is almost nothing left to scroll, so a
+  // stationary row there would read as a stuck one -- a false negative, not a measurement.
   const monthName = (day: Date): string => day.toLocaleDateString(undefined, { month: 'long' });
-  const older = monthName(startOfLocalDay(MINIMUM_ROWS - 1));
-  const separator = grid(phone).getByText(older, { exact: true }).first();
-  await separator.scrollIntoViewIfNeeded();
-  await expect(separator, `the grid marks where ${older} begins`).toBeVisible();
+  const newest = monthName(startOfLocalDay(0));
+  const separator = grid(phone).getByText(newest, { exact: true }).first();
+  await expect(separator, `the grid marks where ${newest} begins`).toBeVisible();
 
-  const label = await labelOf(await rowFor(phone, MINIMUM_ROWS - 1));
+  const label = await labelOf(await rowFor(phone, 0));
 
   expect(
     Number(await styleOf(separator, 'font-weight')),
@@ -1232,8 +1285,18 @@ test('a month separator is a landmark, told apart from the day labels it sits am
 
   // It stays a ROW of the grid rather than a sticky band, so scrolling past it is how you
   // leave a month: scrolled to the end, it has moved with the rows.
-  const beforeScroll = await rectOf(separator, `the ${older} separator`);
-  await scrollToEnd(phone);
+  //
+  // The separator is brought to the top of its own container first, so there is a full grid's
+  // worth of rows left to scroll past it; and the scroll is required to have MOVED before any
+  // conclusion is drawn from a position, since a scroll that does nothing is otherwise
+  // indistinguishable from an element that sticks.
+  await scrollGridToTopOf(phone, separator);
+  const beforeScroll = await rectOf(separator, `the ${newest} separator`);
+  const moved = await scrollGrid(phone, 'end');
+  expect(
+    moved.to - moved.from,
+    "the grid's own container really did scroll, so what follows measures the separator",
+  ).toBeGreaterThan(1);
   const afterScroll = await separator.boundingBox();
   expect(
     afterScroll === null || Math.abs(afterScroll.y - beforeScroll.y) > 1,
