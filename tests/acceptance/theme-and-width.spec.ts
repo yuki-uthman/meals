@@ -424,11 +424,51 @@ const SCREENS: readonly Screen[] = [
 
 // --- Measuring --------------------------------------------------------------
 
-const computed = (locator: Locator, property: string): Promise<string> =>
-  locator.evaluate(
-    (node, name) => getComputedStyle(node as Element).getPropertyValue(name),
-    property,
-  );
+/**
+ * One computed property of one element, read off a node that is still in the document.
+ *
+ * Waiting for visibility is NOT enough, and this is the subtle part. The element WAS on screen when
+ * the locator resolved; what breaks a one-shot read is what happens next. A screen is drawn from
+ * what Postgres held, so the app re-renders when its day-log read lands, and the node the locator
+ * resolved to is REPLACED. getComputedStyle on a detached node returns an EMPTY STRING, so the read
+ * comes back '' -- not a missing element, not a wrong colour -- and an assertion against '' reports
+ * 'the font is wrong' when the truth is 'the node went away'.
+ *
+ * So no handle is held across a re-render. The locator resolution and the style read happen together
+ * inside a single retried step, and the step only settles on a NON-EMPTY value: a detached node, or
+ * a property read before the stylesheet applies, simply causes another attempt. expect.poll re-runs
+ * the whole callback, locator resolution included, which a bare await cannot. The value the poll
+ * settled ON is what is returned -- it is remembered as the callback runs rather than read again
+ * afterwards, because a fresh read after the poll would be one more one-shot read with one more
+ * chance to land on a detached node. Callers therefore assert ordering within a string that is known
+ * to be non-empty.
+ *
+ * Every computed-style read in this spec goes through here: the font families and the palette
+ * colours alike are each a read of a node a re-render can replace.
+ */
+const computed = async (locator: Locator, property: string): Promise<string> => {
+  let settled = '';
+
+  const read = async (): Promise<string> => {
+    settled = '';
+    const target = locator.first();
+    if ((await target.count()) === 0) {
+      return '';
+    }
+    settled = await target
+      .evaluate((node, name) => getComputedStyle(node as Element).getPropertyValue(name), property)
+      .catch(() => '');
+    return settled;
+  };
+
+  await expect
+    .poll(read, {
+      message: `the element whose ${property} is read is on screen and reports a ${property}`,
+    })
+    .not.toBe('');
+
+  return settled;
+};
 
 /**
  * Does the document scroll sideways? Kept because it is the design's own wording, but note that
@@ -566,6 +606,9 @@ for (const scheme of SCHEMES) {
     );
 
     await signIn(phone, accounts.owner);
+    // The cards are drawn from what Postgres held, so wait for the log before reading a card's
+    // colour: a read taken straight after signing in has no retry.
+    await dayLogSettled(phone);
 
     // A card sits on the ground in the card colour: the second half of the palette's two surfaces.
     const card = phone
@@ -642,10 +685,15 @@ for (const scheme of SCHEMES) {
     const phone = await openPhone(browser, WIDTHS[0], scheme);
     await signIn(phone, accounts.owner);
 
-    const headingFamily = await computed(
-      phone.getByRole('heading', { name: /^today$/i }),
-      'font-family',
-    );
+    // The font family is a declaration and does not wait on Google Fonts. What it DOES wait on is the
+    // day-log read: when that lands the app re-renders and this heading's node is replaced, so a
+    // handle held across the re-render reads a detached node and yields an empty string. Waiting for
+    // visibility here would not help -- the heading is visible either way -- so the locator is handed
+    // to computed() unresolved, and computed() re-resolves and re-reads until the value is real.
+    await dayLogSettled(phone);
+    const heading = phone.getByRole('heading', { name: /^today$/i });
+
+    const headingFamily = await computed(heading, 'font-family');
     const serifFallback = /Georgia|serif/i.exec(headingFamily);
     expect(
       headingFamily,
