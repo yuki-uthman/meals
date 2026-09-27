@@ -65,7 +65,7 @@ import { FOOD_FORM_TITLE, foodForm } from './ui/food-form';
 import { mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
-import { historyScreen, type HistoryState } from './ui/history';
+import { historyScreen, HISTORY_SCROLLER_CLASS, type HistoryState } from './ui/history';
 import { lookupScreen, type LookupState, type LookupTab } from './ui/lookup';
 import {
   DEFAULT_CHANGE_WINDOW,
@@ -507,8 +507,15 @@ const start = (): void => {
     return todayScreen();
   };
 
-  /** Where the page is scrolled. The document is what scrolls; nothing nests one. */
-  const scroller = (): Element | null => document.scrollingElement;
+  /**
+   * What the grid's rows scroll inside. Deliberately NOT the document: the History
+   * page does not scroll, the rows scroll within their own container beneath the
+   * pinned column headers, so remembering and restoring a window offset would
+   * restore nothing and returning from a cell would land at the top of ninety rows
+   * again -- the very thing the restoration exists to prevent.
+   */
+  const scroller = (): Element | null =>
+    document.querySelector(`.${HISTORY_SCROLLER_CLASS}`);
 
   /** Remembered as the grid is left, so returning can put it back where it was. */
   const rememberHistoryScroll = (): void => {
@@ -607,7 +614,19 @@ const start = (): void => {
     window.history.pushState(entryState(), '', route);
   };
 
+  /**
+   * Which screens manage their own scrolling. History is a vertical layout that
+   * fits the viewport -- the grid scrolls within it, beneath pinned column headers
+   * -- so the page itself must not scroll on it. Every other screen scrolls the
+   * page as it always did, which is how a long form reaches its lowest control.
+   */
+  const fitsViewport = (): boolean => account !== null && screen === 'history';
+
   const render = (): void => {
+    // Set before the screen is drawn, so the grid is laid out inside a container
+    // that is already the height it will keep and the restored offset is clamped
+    // against the rows' real height rather than against a page-tall box.
+    document.documentElement.classList.toggle('fits-viewport', fitsViewport());
     root.replaceChildren(
       account === null
         ? signInScreen(signInState, { onSubmit: (credentials) => void submit(credentials) })

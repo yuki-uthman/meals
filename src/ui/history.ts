@@ -46,6 +46,15 @@ export type HistoryHandlers = {
 
 export const HISTORY_REGION_LABEL = 'History';
 
+/**
+ * The element the ROWS scroll inside. The page itself does not scroll on this
+ * screen -- which is what makes the pinned column headers worth having -- so the
+ * offset that is remembered and put back is THIS container's and not the window's.
+ * Restoring a window offset would restore nothing, and returning from a cell would
+ * silently land at the top of ninety rows again.
+ */
+export const HISTORY_SCROLLER_CLASS = 'history';
+
 const element = (tag: string, className: string, text?: string): HTMLElement => {
   const node = document.createElement(tag);
   node.className = className;
@@ -241,7 +250,7 @@ export const historyScreen = (
   }
 
   const region = document.createElement('section');
-  region.className = 'history';
+  region.className = HISTORY_SCROLLER_CLASS;
   region.setAttribute('aria-label', HISTORY_REGION_LABEL);
   region.append(gridTable(view.state.rows, view.view, handlers));
 

@@ -149,6 +149,43 @@ h4,
   );
 }
 
+/* A screen that manages its OWN scrolling -- History -- fits the viewport instead:
+   the page itself does not scroll, and the grid scrolls within it, which is what
+   makes pinned column headers worth having at all. The class is put on the root
+   element by the composition root for exactly the screens that ask for it, so
+   every other screen keeps scrolling the page as it always did. */
+html.fits-viewport,
+html.fits-viewport body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html.fits-viewport #app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* min-height:0 all the way down, or a flex child refuses to be shorter than
+     its content and the overflow lands on the page after all. */
+  min-height: 0;
+}
+
+html.fits-viewport .shell,
+html.fits-viewport .shell__main {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+html.fits-viewport .shell__main {
+  display: flex;
+  flex-direction: column;
+}
+
+html.fits-viewport .shell__main > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* Long text wraps instead of widening its container. */
 p,
 li,
@@ -1059,7 +1096,58 @@ label {
   font-size: 0.8125rem;
 }
 
+/* The History screen is a vertical layout: the heading, the view tabs and the
+   legend hold the top, the grid takes the space that is left and scrolls within
+   it, and the caption sits directly beneath the grid above the navigation.
+   The legend is ordered above the grid rather than moved in the markup, because
+   the caption is the grid's own caption and follows it in the document. */
+.history-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.history-screen > .history__views {
+  order: 1;
+  flex: 0 0 auto;
+}
+
+.history-screen > .history__legend {
+  order: 2;
+  flex: 0 0 auto;
+}
+
+.history-screen > .history {
+  order: 3;
+}
+
+.history-screen > .history__caption {
+  order: 4;
+  flex: 0 0 auto;
+}
+
+/* While the read is in flight, or after one that failed, there is no grid: what
+   stands in its place takes the grid's own position beneath the tabs rather than
+   being ordered above them. */
+.history-screen > .history__waiting,
+.history-screen > .notice,
+.history-screen > .button {
+  order: 3;
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+
+/* The rows scroll inside THEIR OWN container, so a row passes underneath the
+   column headers rather than the headers scrolling away and leaving a wall of
+   unlabelled numbers. Nothing here may scroll sideways. */
 .history {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 0 var(--space-2);
 }
 
@@ -1074,8 +1162,17 @@ label {
   font-variant-numeric: tabular-nums;
 }
 
+/* Pinned to the top of the scrolling container, so 'Breakfast', 'Lunch' and
+   'Dinner' stay readable with ninety rows passing beneath them. The background is
+   OPAQUE and the header sits ABOVE the cells: a transparent or under-painted
+   sticky header shows the rows sliding through it, which is the same wall of
+   unlabelled numbers by another route. */
 .history__corner,
 .history__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--canvas);
   padding: var(--space-1);
   color: var(--ink-muted);
   font-size: 0.6875rem;
@@ -1104,13 +1201,18 @@ label {
 /* Where each month the grid reaches begins, across the whole grid: the short day
    label repeats three times over ninety days, so the name of the month is what
    tells a person scrolling back where they are. */
+/* A month is a LANDMARK you scroll to find, so it is told apart from the day
+   labels it sits among: heavier, and in the accent colour, against the muted ink
+   the dates use. Rendered like the dates it would be one more line of the same
+   grey doing nothing. It stays a ROW of the grid rather than a sticky band, so
+   scrolling past it is how you leave a month. */
 .history__month-name {
   padding: var(--space-3) var(--space-1) var(--space-1);
   border-bottom: 1px solid var(--line);
-  color: var(--ink-muted);
-  font-family: var(--font-display);
+  color: var(--accent);
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   text-align: left;
 }
 
@@ -1147,7 +1249,7 @@ label {
 }
 
 .history__caption {
-  margin: var(--space-3) 0 0;
+  margin: 0;
   padding: 0 var(--space-3);
   color: var(--ink-muted);
   font-size: 0.8125rem;
@@ -1157,7 +1259,7 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin: var(--space-2) 0 var(--space-5);
+  margin: 0;
   padding: 0 var(--space-3);
   list-style: none;
 }
