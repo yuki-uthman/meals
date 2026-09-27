@@ -131,7 +131,9 @@ const monthSeparator = (month: string, columns: number): HTMLElement => {
   line.className = 'history__month';
   const cell = element('th', 'history__month-name', month);
   cell.setAttribute('scope', 'row');
-  cell.colSpan = columns;
+  // setAttribute rather than the colSpan property: element() returns HTMLElement,
+  // which does not carry a table cell's typed properties.
+  cell.setAttribute('colspan', String(columns));
   line.append(cell);
   return line;
 };

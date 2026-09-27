@@ -384,6 +384,46 @@ const dayLabel = (daysAgo: number): RegExp => {
 };
 
 /**
+ * The long weekdays and months the row header's ACCESSIBLE NAME is built from. The design
+ * fixes that name as 'Thursday 25 September' while the visible label stays the short
+ * 'Thu 25' the 360 px grid needs, and it is the only thing that identifies ONE row: over
+ * ninety days the short label, and a weekday-and-day-number pattern with it, matches three
+ * rows a month apart. These are fixed English words and not the reader's locale, so the
+ * whole name is matched exactly. (The month SEPARATOR follows the locale, and nothing here
+ * is matched on it.)
+ */
+const LONG_WEEKDAYS = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
+const LONG_MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+/** 'Thursday 25 September': the one name that picks out a single row of the ninety. */
+const spokenDayName = (daysAgo: number): string => {
+  const day = startOfLocalDay(daysAgo);
+  return `${LONG_WEEKDAYS[day.getDay()]} ${day.getDate()} ${LONG_MONTHS[day.getMonth()]}`;
+};
+
+/**
  * A row is identified by its DAY LABEL CELL and never by the row's whole text. A row's text
  * is the concatenation of its cells with no separator between them, so a row reading
  * 'Sat 26' followed by a cell reading 260 has the text 'Sat 26260...', in which the label
@@ -393,7 +433,10 @@ const dayLabel = (daysAgo: number): RegExp => {
  * Whether the grid is a table or a list is still a presentation choice: a table exposes the
  * label as a row header, and a list is matched on the label cell it exposes instead.
  */
-const labelCell = (page: Page, name: RegExp): Locator => page.getByRole('rowheader', { name });
+const labelCell = (page: Page, name: RegExp | string): Locator =>
+  typeof name === 'string'
+    ? page.getByRole('rowheader', { name, exact: true })
+    : page.getByRole('rowheader', { name });
 
 /** The day rows: the ones whose label names a weekday. A header row carries none. */
 const dayRows = async (page: Page): Promise<Locator> => {
@@ -406,14 +449,22 @@ const dayRows = async (page: Page): Promise<Locator> => {
 };
 
 const rowFor = async (page: Page, daysAgo: number): Promise<Locator> => {
-  const label = dayLabel(daysAgo);
   const rows = await allRows(page);
-  const matching =
-    (await labelCell(page, WEEKDAY).count()) > 0
-      ? rows.filter({ has: labelCell(page, label) })
-      : (await dayRows(page)).filter({ hasText: label });
-  await expect(matching, `exactly one row for ${daysAgo} day(s) ago`).toHaveCount(1);
-  return matching.first();
+  if ((await labelCell(page, WEEKDAY).count()) > 0) {
+    // Matched on the row header's full accessible name -- weekday, day AND month -- because
+    // that is the only thing that names one row rather than its two namesakes a month apart.
+    const matching = rows.filter({ has: labelCell(page, spokenDayName(daysAgo)) });
+    await expect(matching, `exactly one row for ${spokenDayName(daysAgo)}`).toHaveCount(1);
+    return matching.first();
+  }
+  // A list exposes no row header. Its rows are one per date, newest first, which is asserted
+  // in its own right, so the row is taken by position and its short label checked.
+  const row = (await dayRows(page)).nth(daysAgo);
+  expect(
+    await textOf(await labelOf(row)),
+    `row ${daysAgo + 1} is the date ${daysAgo} day(s) ago`,
+  ).toMatch(dayLabel(daysAgo));
+  return row;
 };
 
 /** One row's day label cell: the row header where there is one, else the row itself. */
