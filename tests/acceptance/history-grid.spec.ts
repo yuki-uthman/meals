@@ -1122,6 +1122,127 @@ test('the bottom navigation holds its place and the grid reserves room for it', 
   expect(await scrollsHorizontally(phone), 'reserving room never widens the page').toBe(false);
 });
 
+const styleOf = (locator: Locator, property: string): Promise<string> =>
+  locator.evaluate(
+    (node: Element, name: string) => getComputedStyle(node).getPropertyValue(name),
+    property,
+  );
+
+/** An opaque background: a transparent sticky header shows the rows sliding through it. */
+const isOpaque = (colour: string): boolean => {
+  const parts = colour.match(/[\d.]+/g);
+  if (parts === null) return false;
+  return parts.length < 4 || Number(parts[3]) === 1;
+};
+
+/** The column header for one of the meal columns, however the grid is marked up. */
+const columnHeader = async (page: Page, name: RegExp): Promise<Locator> => {
+  const header = grid(page).getByRole('columnheader', { name });
+  if ((await header.count()) > 0) return header.first();
+  return grid(page).getByText(name).first();
+};
+
+test('the column headers stay pinned while the rows scroll underneath them', async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  const header = await columnHeader(phone, /breakfast/i);
+  const atRest = await rectOf(header, "the 'Breakfast' column header");
+
+  // The rows scroll inside THEIR OWN container: the page itself does not scroll on this
+  // screen, which is what makes pinned headers worth having in the first place.
+  const documentScrolls = await phone.evaluate(() => {
+    const root = document.scrollingElement ?? document.documentElement;
+    return root.scrollHeight > root.clientHeight + 1;
+  });
+  expect(
+    documentScrolls,
+    'the History page itself does not scroll; the grid scrolls within it',
+  ).toBe(false);
+
+  await scrollToEnd(phone);
+  expect(await scrollOffset(phone), 'ninety rows do scroll somewhere').toBeGreaterThan(0);
+
+  const scrolled = await rectOf(header, "the 'Breakfast' column header after scrolling");
+  expect(
+    Math.abs(scrolled.y - atRest.y),
+    "'Breakfast' stays pinned to the top of the scrolling area rather than scrolling away",
+  ).toBeLessThanOrEqual(1);
+  await expect(header, 'and is still there to be read').toBeVisible();
+
+  // A pinned header that is transparent, or painted below the cells, shows the rows sliding
+  // through it -- which is the same wall of unlabelled numbers by another route. What is
+  // asserted is what a reader would see: at the header's own centre, the header is on top.
+  expect(
+    isOpaque(await styleOf(header, 'background-color')),
+    'the pinned header carries an OPAQUE background',
+  ).toBe(true);
+  const onTop = await phone.evaluate(
+    ({ x, y }) => document.elementFromPoint(x, y)?.textContent?.trim() ?? '',
+    { x: scrolled.x + scrolled.width / 2, y: scrolled.y + scrolled.height / 2 },
+  );
+  expect(
+    onTop,
+    'the header sits ABOVE the cells: a row passes underneath it rather than through it',
+  ).toMatch(/breakfast/i);
+
+  // The caption sits directly beneath the grid, above the navigation, and does not scroll
+  // away with the rows: it says what the colour means, which is useless once it is gone.
+  const caption = phone.getByText(LEVEL_CAPTION);
+  await expect(caption, 'the caption is still on screen with the grid scrolled to its end').toBeVisible();
+  const captionBox = await rectOf(caption, 'the caption');
+  const navBox = await rectOf(navigation(phone), 'the bottom navigation');
+  expect(
+    captionBox.y,
+    'the caption is beneath the column headers, not floating above the grid',
+  ).toBeGreaterThan(atRest.y);
+  expect(
+    captionBox.y + captionBox.height,
+    'and above the navigation rather than behind it',
+  ).toBeLessThanOrEqual(navBox.y + 1);
+
+  expect(await scrollsHorizontally(phone), 'pinning a header never widens the page').toBe(false);
+});
+
+test('a month separator is a landmark, told apart from the day labels it sits among', async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  // The month the grid reaches back into, which is a separator somewhere down the ninety rows
+  // rather than at the top. A month rendered like the dates is one more line of the same grey
+  // doing nothing, and a landmark you cannot pick out is not one.
+  const monthName = (day: Date): string => day.toLocaleDateString(undefined, { month: 'long' });
+  const older = monthName(startOfLocalDay(MINIMUM_ROWS - 1));
+  const separator = grid(phone).getByText(older, { exact: true }).first();
+  await separator.scrollIntoViewIfNeeded();
+  await expect(separator, `the grid marks where ${older} begins`).toBeVisible();
+
+  const label = await labelOf(await rowFor(phone, MINIMUM_ROWS - 1));
+
+  expect(
+    Number(await styleOf(separator, 'font-weight')),
+    'the month is heavier than the dates it sits among',
+  ).toBeGreaterThan(Number(await styleOf(label, 'font-weight')));
+  expect(
+    await styleOf(separator, 'color'),
+    'and a different colour from the muted ink the dates use',
+  ).not.toBe(await styleOf(label, 'color'));
+
+  // It stays a ROW of the grid rather than a sticky band, so scrolling past it is how you
+  // leave a month: scrolled to the end, it has moved with the rows.
+  const beforeScroll = await rectOf(separator, `the ${older} separator`);
+  await scrollToEnd(phone);
+  const afterScroll = await separator.boundingBox();
+  expect(
+    afterScroll === null || Math.abs(afterScroll.y - beforeScroll.y) > 1,
+    'the separator scrolls with its rows rather than sticking to the top of the grid',
+  ).toBe(true);
+
+  expect(await scrollsHorizontally(phone)).toBe(false);
+});
+
 test("another account's grid holds none of the owner's readings", async ({ browser }) => {
   const phone = await openHistory(browser, accounts.stranger);
 
