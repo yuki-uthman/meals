@@ -1456,6 +1456,71 @@ test('the column headers stay pinned while the rows scroll underneath them', asy
   expect(await scrollsHorizontally(phone), 'pinning a header never widens the page').toBe(false);
 });
 
+/** Computed letter-spacing as a fraction of the font size, so 'em' can be read off 'px'. */
+const letterSpacingRatio = async (locator: Locator): Promise<number> => {
+  const spacing = await styleOf(locator, 'letter-spacing');
+  const size = Number((await styleOf(locator, 'font-size')).replace('px', ''));
+  if (spacing === 'normal' || !Number.isFinite(size) || size === 0) return 0;
+  return Number(spacing.replace('px', '')) / size;
+};
+
+test('the column headers anchor the grid rather than being the quietest thing on it', async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  // These headers hold the top of the scroll container and are what every row underneath is
+  // read against, so 'more prominent' is stated on every axis a person actually notices:
+  // one step of font weight with the colour left muted was previously indistinguishable from
+  // the day labels, which is the failure this case exists to catch.
+  const label = await labelOf(await rowFor(phone, 0));
+  const labelColour = await styleOf(label, 'color');
+  const labelWeight = Number(await styleOf(label, 'font-weight'));
+
+  for (const column of [/breakfast/i, /lunch/i, /dinner/i]) {
+    const header = await columnHeader(phone, column);
+    const what = `the ${column.source} column header`;
+
+    expect(
+      await styleOf(header, 'color'),
+      `${what} is set in the INK colour, never the muted ink the day labels use`,
+    ).not.toBe(labelColour);
+    const weight = Number(await styleOf(header, 'font-weight'));
+    expect(weight, `${what} is set at weight 700`).toBeGreaterThanOrEqual(700);
+    expect(weight, `${what} is heavier than the day labels beneath it`).toBeGreaterThan(
+      labelWeight,
+    );
+
+    // Upper case asserted on what is RENDERED, so a stylesheet's text-transform and a label
+    // written in capitals are both accepted: what a reader sees is the claim.
+    const text = await textOf(header);
+    expect(text, `${what} has text to read`).toMatch(/[A-Za-z]/);
+    expect(text, `${what} is set in upper case`).toBe(text.toUpperCase());
+
+    expect(
+      await letterSpacingRatio(header),
+      `${what} is letter-spaced, so it reads as a heading rather than as one more row`,
+    ).toBeGreaterThan(0.04);
+  }
+
+  // And the header row carries a rule beneath it, which is what separates the headers from
+  // the ninety rows that pass underneath them. Whether the rule is drawn on the header cells
+  // or on the row that holds them is a markup choice; that there is one is not.
+  const breakfast = await columnHeader(phone, /breakfast/i);
+  const ruled = await breakfast.evaluate((node: Element) => {
+    const bottomRule = (element: Element): number =>
+      Number.parseFloat(getComputedStyle(element).borderBottomWidth || '0');
+    for (let walk: Element | null = node; walk !== null; walk = walk.parentElement) {
+      if (bottomRule(walk) > 0) return true;
+      if (walk.matches('thead, tr, [role="row"]')) return bottomRule(walk) > 0;
+    }
+    return false;
+  });
+  expect(ruled, 'the header row carries a rule beneath it').toBe(true);
+
+  expect(await scrollsHorizontally(phone), 'prominent headers never widen the page').toBe(false);
+});
+
 test('a month separator is a landmark, told apart from the day labels it sits among', async ({
   browser,
 }) => {
