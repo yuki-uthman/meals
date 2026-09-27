@@ -590,6 +590,11 @@ const start = (): void => {
     const route = routeFor();
     const current = window.location.hash;
     if (current === route) {
+      // The same screen redrawn keeps its entry, and a replacement asked for is
+      // answered by it: the flag is consumed here too, because exactly ONE
+      // navigation replaces its entry and a flag that survives its one intended
+      // use would turn every later Back into an exit from the site.
+      replaceNextEntry = false;
       window.history.replaceState(entryState(), '', route);
       return;
     }

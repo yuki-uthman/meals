@@ -129,11 +129,15 @@ const emptyCell = (cell: EmptyCell, handlers: HistoryHandlers): HTMLElement => {
 const monthSeparator = (month: string, columns: number): HTMLElement => {
   const line = document.createElement('tr');
   line.className = 'history__month';
-  const cell = element('th', 'history__month-name', month);
-  cell.setAttribute('scope', 'row');
-  // setAttribute rather than the colSpan property: element() returns HTMLElement,
-  // which does not carry a table cell's typed properties.
-  cell.setAttribute('colspan', String(columns));
+  // Built as a TABLE CELL rather than through element(), which returns HTMLElement
+  // and has no colSpan: a browser source that does not compile takes the whole
+  // acceptance suite down with it, because the support builds the bundle before
+  // serving it.
+  const cell = document.createElement('th');
+  cell.className = 'history__month-name';
+  cell.textContent = month;
+  cell.scope = 'row';
+  cell.colSpan = columns;
   line.append(cell);
   return line;
 };

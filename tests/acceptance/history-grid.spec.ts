@@ -59,9 +59,11 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    use most.
  *  - A screen's identity lives in the URL as a HASH route, so the URL changes as screens open
  *    and a meal's own URL RELOADS to that meal.
- *  - The first screen REPLACES its entry rather than pushing one, so Back from it leaves the
- *    site rather than cycling inside the app. That is asserted as the entry count not growing
- *    on the first render, rather than by trying to observe leaving.
+ *  - The first screen REPLACES its entry rather than pushing one, so Back from it LEAVES the
+ *    site rather than cycling inside the app, while every other navigation pushes exactly one
+ *    entry. Asserted by driving Back off the end of the app's own stack -- the count between
+ *    the document loading and the first render is not observable, since the goto that loads
+ *    the page is itself a navigation.
  *  - Signing out replaces the stack, so Back after signing out cannot walk into a screen
  *    belonging to the account that just left.
  *
@@ -1251,21 +1253,50 @@ test("a meal's own URL reloads to that meal, because the screen's identity is in
 test('the first screen replaces its entry, so Back from it leaves the site', async ({ browser }) => {
   const context = await browser.newContext({ viewport: PHONE_VIEWPORT });
   const phone = await context.newPage();
-
-  // A brand-new page holds exactly one entry, and the first navigation replaces it, so the
-  // count after the app's first render says whether that render pushed or replaced. If it
-  // pushed, Back from the first screen would cycle inside the app instead of leaving it, and
-  // the count would have grown.
-  const beforeFirstRender = await historyLength(phone);
   await phone.goto(stack.siteUrl);
   await expect(signInForm(phone), 'the first screen renders').toBeVisible();
+  await signIn(phone, accounts.owner);
+
+  // The first screen after the session change is the one navigation that REPLACES its entry.
+  // What is observable is the CLAIM that makes: the app holds exactly one entry of its own,
+  // so Back from that first screen leaves the site rather than cycling inside the app. The
+  // count between the document loading and the app's first render cannot be observed at all --
+  // the goto is itself a navigation -- so the baseline is taken here, on the first screen.
+  await expect(phone.getByRole('heading', { name: /^today$/i })).toBeVisible();
+  await expectRoute(phone, /^#.+/, 'a route for the first screen');
+  const onFirstScreen = await historyLength(phone);
+
+  // Every OTHER navigation pushes, so opening a second screen grows the stack by exactly one.
+  // A replace flag that survived its one intended use would show up here as no growth at all,
+  // and then as Back leaving the site one screen too early.
+  await navigate(phone, /^history$/i);
+  await expect(grid(phone), 'the second screen opens').toBeVisible();
+  await expectRoute(phone, /^#history/, 'the History route');
   expect(
     await historyLength(phone),
-    'the first screen REPLACES the current entry rather than pushing one',
-  ).toBe(beforeFirstRender);
+    'opening a screen PUSHES exactly one entry',
+  ).toBe(onFirstScreen + 1);
 
-  // It still carries a route of its own: replaced, not absent.
-  await expectRoute(phone, /^#.+/, 'a route for the first screen');
+  // Back from the second screen returns to the first, inside the app.
+  await phone.goBack();
+  await expect(
+    phone.getByRole('heading', { name: /^today$/i }),
+    'Back from the second screen returns to the first',
+  ).toBeVisible();
+  expect(
+    await historyLength(phone),
+    'going back does not change how many entries there are',
+  ).toBe(onFirstScreen + 1);
+
+  // And Back from the FIRST screen leaves the site, which is the claim: the first render
+  // replaced its entry rather than pushing one, so there is nothing of this app behind it.
+  await phone.goBack();
+  await expect
+    .poll(() => phone.url(), {
+      message: 'Back from the first screen leaves the site rather than cycling inside the app',
+      timeout: 5_000,
+    })
+    .toBe('about:blank');
 });
 
 test('after signing out, Back cannot walk back into the account that just left', async ({
