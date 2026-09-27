@@ -148,6 +148,13 @@ const start = (): void => {
   /** Guards against a slow grid read from an earlier account landing on a later one. */
   let historyToken = 0;
   /**
+   * How far the grid was scrolled when it was last left. Coming back to the top of
+   * ninety rows after cancelling is barely better than being dumped on Today: the
+   * point of going back is to carry on where you were, and that is worst exactly
+   * where it matters most -- part-way down somebody's paper log being copied in.
+   */
+  let historyScroll = 0;
+  /**
    * The section a form was opened from, when it was not the day log. A form that
    * came from History keeps History's navigation, which is how the grid is got
    * back to; a form opened on Today has none, because the way out of one is
@@ -361,10 +368,16 @@ const start = (): void => {
           // The view colours what is already in hand, so choosing one is a redraw
           // and never another read.
           onView: (next) => {
+            // Choosing a view recolours the rows in front of the person, so it
+            // keeps them in front of the person rather than jumping to the top.
+            rememberHistoryScroll();
             historyView = next;
             render();
           },
           onOpen: (target) => {
+            // Where the person was in the grid, kept before the cell takes them
+            // out of it, so leaving the form they opened lands them back here.
+            rememberHistoryScroll();
             if (target.kind === 'meal') {
               // A slot cell opens that meal's EDIT form, which is where the after
               // reading taken two hours later gets added.
@@ -460,12 +473,41 @@ const start = (): void => {
     return todayScreen();
   };
 
+  /** Where the page is scrolled. The document is what scrolls; nothing nests one. */
+  const scroller = (): Element | null => document.scrollingElement;
+
+  /** Remembered as the grid is left, so returning can put it back where it was. */
+  const rememberHistoryScroll = (): void => {
+    const node = scroller();
+    if (node !== null) historyScroll = node.scrollTop;
+  };
+
+  /**
+   * Put back after the grid is drawn. Twice: once now, and once on the next frame,
+   * because the rows' height is what the offset is clamped against and the browser
+   * has not necessarily laid ninety of them out yet.
+   */
+  const restoreHistoryScroll = (): void => {
+    const node = scroller();
+    if (node === null) return;
+    node.scrollTop = historyScroll;
+    requestAnimationFrame(() => {
+      const again = scroller();
+      // Only while the grid is still the screen: a frame that lands after the
+      // person has moved on must not scroll whatever replaced it.
+      if (again !== null && screen === 'history' && account !== null) {
+        again.scrollTop = historyScroll;
+      }
+    });
+  };
+
   const render = (): void => {
     root.replaceChildren(
       account === null
         ? signInScreen(signInState, { onSubmit: (credentials) => void submit(credentials) })
         : signedInScreen(),
     );
+    if (account !== null && screen === 'history') restoreHistoryScroll();
   };
 
   // ------------------------------------------------------------ filling in
@@ -605,6 +647,8 @@ const start = (): void => {
 
   /** The bottom navigation: the three sections this brief has built so far. */
   const goTo = (tab: ShellTab): void => {
+    // The grid's place is kept as it is left, whichever way it is left.
+    if (screen === 'history') rememberHistoryScroll();
     if (tab === 'history') {
       void openHistorySection();
       return;
@@ -936,7 +980,24 @@ const start = (): void => {
     render();
   };
 
+  /**
+   * Back to the grid already in hand, deliberately WITHOUT another read: the
+   * material is the same material, and a read landing a moment later would redraw
+   * the grid underneath the person and take the restored scroll position with it.
+   */
+  const showHistory = (): void => {
+    screen = 'history';
+    render();
+  };
+
+  /**
+   * Leaving a form -- by Cancel, or by any other way out -- returns to the screen
+   * it was opened FROM rather than to Today. A cell tapped in History leads to the
+   * edit form and back to History, at the same scroll position; sending every exit
+   * to Today throws away where the person was.
+   */
   const leaveForm = (): void => {
+    const from = formSection;
     clearDetail();
     mealDraft = null;
     foodDraft = null;
@@ -946,6 +1007,15 @@ const start = (): void => {
     padTarget = null;
     nightPadOpen = false;
     formSection = undefined;
+    if (from === 'history') {
+      showHistory();
+      return;
+    }
+    if (from === 'lookup') {
+      screen = 'lookup';
+      render();
+      return;
+    }
     screen = 'day';
     render();
   };
@@ -1007,13 +1077,19 @@ const start = (): void => {
     saving = false;
 
     if (outcome.kind === 'saved') {
-      // Back to Today for the same date, and the day is re-read: the new card is
-      // what the store holds rather than what the form believed it wrote.
+      // Back to the screen the form was opened FROM, and what it shows is re-read:
+      // the new card, or the newly filled cell, is what the store holds rather than
+      // what the form believed it wrote.
+      const from = formSection;
       mealDraft = null;
       foodDraft = null;
       formMessage = null;
       padTarget = null;
       formSection = undefined;
+      if (from === 'history') {
+        void openHistorySection();
+        return;
+      }
       screen = 'day';
       void loadDayLog();
       return;
@@ -1050,13 +1126,19 @@ const start = (): void => {
     saving = false;
 
     if (outcome.kind === 'saved') {
-      // Back to Today for the same date, and the day is re-read: the night card
-      // shows what the store holds rather than what the form believed it wrote.
+      // Back to the screen the night was opened FROM, and what it shows is re-read:
+      // the night card, or the grid's night column, shows what the store holds
+      // rather than what the form believed it wrote.
+      const from = formSection;
       nightDraft = null;
       nightHistory = null;
       formMessage = null;
       nightPadOpen = false;
       formSection = undefined;
+      if (from === 'history') {
+        void openHistorySection();
+        return;
+      }
       screen = 'day';
       void loadDayLog();
       return;
@@ -1099,6 +1181,8 @@ const start = (): void => {
     historyWindow = null;
     historyMessage = null;
     historyView = 'before';
+    // Where the previous person had scrolled to goes with their grid.
+    historyScroll = 0;
     // So do the meals a lookup matches over, and what was typed to search them: a
     // lookup may never reach a meal of the account that has just left.
     lookupToken += 1;
@@ -1179,6 +1263,8 @@ const start = (): void => {
     historyWindow = null;
     historyMessage = null;
     historyView = 'before';
+    // And where the previous person had scrolled to in it.
+    historyScroll = 0;
     // And for the lookup: a search may never match a meal of the previous account's.
     lookupToken += 1;
     lookupMeals = null;

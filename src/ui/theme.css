@@ -10,6 +10,11 @@
   --space-5: 1.5rem;
   --radius: 0.75rem;
 
+  /* The height of the fixed bottom navigation. It is a token because two rules
+     depend on the same number: the bar's own height, and the room the scrolling
+     content reserves below itself so nothing ends up behind the bar. */
+  --nav-height: 3.5rem;
+
   /* The canvas's two typefaces. Each names its fallback, so the app is fully
      usable before the webfonts arrive and if they never do. */
   --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -129,11 +134,19 @@ h4,
   font-family: var(--font-body);
 }
 
+/* The content reserves room for the fixed navigation: the bar's height plus the
+   device's safe-area inset, and a gap on top of that. Without it the last day row
+   of the grid and the lowest control of a form sit behind the bar, visible but
+   untappable -- the classic failure of a fixed bottom bar, and invisible to anyone
+   testing in a desktop window. */
 #app {
   width: 100%;
   max-width: 40rem;
   margin: 0 auto;
   padding: var(--space-4);
+  padding-bottom: calc(
+    var(--nav-height) + env(safe-area-inset-bottom, 0px) + var(--space-5)
+  );
 }
 
 /* Long text wraps instead of widening its container. */
@@ -967,10 +980,25 @@ label {
   cursor: pointer;
 }
 
-/* The bottom navigation: the two sections built so far, side by side and each
-   taking half the width, so it is fluid at 360 px like everything else. */
+/* The bottom navigation: the sections built so far, side by side and each taking
+   its share of the width, so it is fluid at 360 px like everything else.
+
+   It is FIXED to the bottom of the viewport, the way an Android app's navigation
+   bar is, rather than flowing after the content and rising and falling with it:
+   it holds its place while ninety rows of grid scroll underneath. The room the
+   content reserves for it is below, on #app. */
 .shell__nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
   display: flex;
+  align-items: stretch;
+  /* A known height, because the content's reserved room is measured against it:
+     a bar of unknown height could not be cleared reliably. */
+  height: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
