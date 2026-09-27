@@ -27,13 +27,23 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    page, which is also what makes the legend switch with the view.
  *  - A band is read off the rule in src/domain/band.ts and never off the size of the
  *    number: the three-days-ago dinner falls 260 to 200, which is −60, and −60 is dropped.
- *  - Nothing behind a cell means an empty cell: no band, no digits, no control. A meal with
- *    no after reading has no change, so it is empty in Change and Both and still shows its
- *    before reading in Before. A missing measurement is never drawn as a change of zero.
- *  - There are no period controls. The grid runs from today back to the EARLIEST recorded
- *    entry with a floor of fourteen rows, and going further back is scrolling.
- *  - A slot cell opens that meal's EDIT form, which is where the after reading taken two
- *    hours later gets added; a night cell opens the night screen for that night.
+ *  - Nothing behind a cell means an empty outline: no band and no digits, because a missing
+ *    measurement is never drawn as a change of zero. A meal with no after reading has no
+ *    change, so it is empty in Change and Both and still shows its before reading in Before.
+ *  - An empty cell IS tappable, and that is the point of the screen: backfilling a day kept
+ *    on paper. An empty slot cell opens New meal with that DATE and that SLOT already
+ *    chosen, saving records against that date rather than today, and the date is named on
+ *    the form because it is not today. An empty night cell opens the night screen for that
+ *    night.
+ *  - There are no period controls. The grid runs from today back to whichever is EARLIER --
+ *    ninety days ago or the oldest recorded entry -- and going further back is scrolling.
+ *    Ninety days is the floor because the days worth backfilling are by definition days
+ *    with nothing in them, which a grid bounded by existing data could never reach.
+ *  - Over that span the short label 'Tue 22' is ambiguous three times over, so the rows
+ *    carry a month separator naming each month the grid reaches.
+ *  - A slot cell with a meal behind it opens that meal's EDIT form, which is where the after
+ *    reading taken two hours later gets added; a night cell opens the night screen for that
+ *    night.
  *
  * Bands are asserted by NAME and never by colour, and widgets are located tolerantly --
  * whether the grid is a table or a list, and how a cell is worded, are presentation
@@ -52,11 +62,12 @@ const LEVEL_BANDS = ['low', 'in-range', 'high', 'very-high'] as const;
 const CHANGE_BANDS = ['dropped', 'stable', 'rose', 'rose-high'] as const;
 
 /**
- * The floor: a log with one entry still reads as a grid rather than as a stranded row. The
- * fixture's oldest entry is four days ago, so fourteen rows is also what this grid shows,
- * but the claim asserted is the floor and the reach back to the oldest entry, not a period.
+ * The floor: the grid runs from today back to whichever is EARLIER, ninety days ago or the
+ * oldest recorded entry. The fixture's oldest entry is four days ago, so ninety rows is what
+ * this grid shows, and the claim asserted is that floor -- not a period, and not a reach
+ * bounded by the data, which could never offer an empty day to fill in.
  */
-const MINIMUM_ROWS = 14;
+const MINIMUM_ROWS = 90;
 
 let stack: LocalStack;
 let accounts: SeededAccounts;
@@ -221,8 +232,15 @@ const rows: readonly RowExpectation[] = [
   },
 ];
 
-/** The rows within the floor that have nothing behind any cell at all. */
-const EMPTY_ROW_DAYS_AGO = [0, 1, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
+/**
+ * Rows within the floor that have nothing behind any cell at all, sampled across the ninety
+ * days rather than enumerated: the claim is that such a row carries its date and no reading,
+ * and it is the same claim on day 6 as on day 89.
+ */
+const EMPTY_ROW_DAYS_AGO = [0, 1, 6, 7, 30, 60, 89] as const;
+
+/** The day whose empty dinner cell this oracle backfills through. Nothing is seeded on it. */
+const BACKFILL_DAYS_AGO = 8;
 
 // --- Seeding ----------------------------------------------------------------
 
@@ -497,12 +515,21 @@ const assertCell = async (
   const text = normaliseSigns(await textOf(located));
 
   if (expected === null) {
-    // Nothing behind it: an empty outline. No band, no number, and no control, because a
-    // cell that opens nothing must not be offered as one.
+    // Nothing behind it: an empty outline carrying no band and no digits, because a missing
+    // measurement is never drawn as a change of zero.
     await expect(located.locator('[data-level-band]'), `${where} carries no level band`).toHaveCount(0);
     await expect(located.locator('[data-change-band]'), `${where} carries no change band`).toHaveCount(0);
     expect(text, `${where} shows no number -- a missing measurement is not a zero`).not.toMatch(/\d/);
-    expect(await controlCount(located), `${where} is not tappable`).toBe(0);
+    // It IS tappable: backfilling is the reason History exists for somebody who has been
+    // keeping this log on paper, and an untappable empty cell would make the one screen that
+    // shows a missing day the one screen that cannot fill it. What it opens is asserted in
+    // its own test below; here the claim is only that the control is offered, and that it
+    // still says which day and which column it belongs to.
+    expect(await controlCount(located), `${where} is one control that can be filled in`).toBe(1);
+    const opener = await controlIn(located);
+    const spokenEmpty = normaliseSigns((await opener.getAttribute('aria-label')) ?? '');
+    expect(spokenEmpty, `${where} names its day`).toMatch(dayLabel(row.daysAgo));
+    expect(spokenEmpty, `${where} names its column`).toMatch(cell.names);
     return;
   }
 
@@ -539,7 +566,16 @@ const assertEmptyRows = async (page: Page): Promise<void> => {
     ).toMatch(dayLabel(daysAgo));
     await expect(row.locator('[data-level-band]')).toHaveCount(0);
     await expect(row.locator('[data-change-band]')).toHaveCount(0);
-    expect(await controlCount(row), `the empty row ${daysAgo} day(s) ago offers no control`).toBe(0);
+    // Four fillable cells and not one reading: a day with nothing in it is exactly the day
+    // somebody opens History to fill in.
+    expect(
+      await controlCount(row),
+      `the empty row ${daysAgo} day(s) ago offers all four of its cells to fill in`,
+    ).toBe(4);
+    expect(
+      normaliseSigns(await textOf(row)).replace(dayLabel(daysAgo), ''),
+      `the empty row ${daysAgo} day(s) ago shows no reading`,
+    ).not.toMatch(/\d/);
   }
 };
 
@@ -563,11 +599,14 @@ test('the grid opens on Before: one row per day, four chronological columns, col
   // scrolls, so going further back is scrolling rather than choosing a bucket.
   await assertNoPeriodControls(phone);
 
-  // One row per calendar date, with the floor of fourteen so a short log still reads as a
-  // grid, and reaching back at least to the oldest entry four days ago.
+  // One row per calendar date, reaching back to whichever is earlier: ninety days ago or the
+  // oldest entry. The oldest entry here is four days ago, so the floor is what decides, and
+  // the rows past it are exactly the empty days this screen exists to fill in.
   const dayRowCount = await (await dayRows(phone)).count();
-  expect(dayRowCount, 'the grid has a floor of fourteen rows').toBeGreaterThanOrEqual(MINIMUM_ROWS);
-  for (const daysAgo of [0, 4]) {
+  expect(dayRowCount, 'the grid runs back at least ninety days').toBeGreaterThanOrEqual(
+    MINIMUM_ROWS,
+  );
+  for (const daysAgo of [0, 4, MINIMUM_ROWS - 1]) {
     await rowFor(phone, daysAgo);
   }
 
@@ -701,6 +740,106 @@ test('tapping a cell opens the entry behind it, where it can be finished or corr
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
 
+test('the rows mark where each month begins, because a short day label is ambiguous over ninety days', async ({
+  browser,
+}) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  // Every month the grid reaches, and only those: the label 'Tue 22' repeats three times
+  // over ninety days, so a person scrolling back to a particular week cannot tell which
+  // month they are looking at unless the grid says so.
+  const monthName = (day: Date): string => day.toLocaleDateString(undefined, { month: 'long' });
+  const reached = new Set<string>();
+  for (let daysAgo = 0; daysAgo < MINIMUM_ROWS; daysAgo += 1) {
+    reached.add(monthName(startOfLocalDay(daysAgo)));
+  }
+
+  const gridText = await textOf(grid(phone));
+  for (const month of reached) {
+    expect(gridText, `the grid marks where ${month} begins`).toContain(month);
+  }
+
+  // A month the grid does not reach is not named, so the separator marks this span rather
+  // than being a fixed row of twelve.
+  const beyond = monthName(startOfLocalDay(MINIMUM_ROWS + 40));
+  if (!reached.has(beyond)) {
+    expect(gridText, `${beyond} is outside the grid and is not named`).not.toContain(beyond);
+  }
+});
+
+test('an empty cell is where a day kept on paper gets filled in', async ({ browser }) => {
+  const phone = await openHistory(browser, accounts.owner);
+
+  const day = startOfLocalDay(BACKFILL_DAYS_AGO);
+  // Nothing whatever is seeded on this day, which is the point: the days worth backfilling
+  // are by definition the days with nothing in them.
+  const emptyDinner = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 3);
+  await (await controlIn(emptyDinner)).click();
+
+  await expect(
+    phone.getByText(/new meal/i),
+    'an empty slot cell opens a new entry rather than an editor for nothing',
+  ).toBeVisible();
+
+  // The slot is already chosen, because the cell says which slot it is.
+  await expect(
+    phone.getByRole('radio', { name: /^dinner$/i }),
+    'the cell opened its own slot, already chosen',
+  ).toBeChecked();
+
+  // The date being recorded is named on the form, because it is not today: a backfilled
+  // entry must never be mistakable for today's.
+  const named = new RegExp(`${day.getDate()}\\b`);
+  const formText = await textOf(phone.locator('body'));
+  expect(formText, 'the form names the date it is recording against').toMatch(named);
+  expect(formText, 'and says which month, so the day number cannot be read as today').toContain(
+    day.toLocaleDateString(undefined, { month: 'long' }),
+  );
+
+  // Fill in the least a meal may be recorded with: a food, and the reading taken before it.
+  await phone.getByLabel('Glucose before', { exact: true }).fill('150');
+  await phone.getByRole('button', { name: /^add food$/i }).click();
+  await phone.getByLabel('Food name', { exact: true }).fill('Rice');
+  await phone.getByRole('radio', { name: /carb/i }).first().check();
+  await phone.getByRole('button', { name: /^save$/i }).click();
+  // The food is handed back to the meal before the meal itself is saved, so the second Save
+  // is unambiguously the meal's.
+  await expect(phone.getByText(/rice/i), 'the food was kept on the meal').toBeVisible();
+  await phone.getByRole('button', { name: /^save$/i }).click();
+
+  // Saving records against THAT date rather than today, which is the whole claim: the row
+  // eight days ago now holds the reading, in its dinner column, banded by its level.
+  await navigate(phone, /^history$/i);
+  await expect(grid(phone)).toBeVisible();
+  const filled = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 3);
+  expect(
+    await textOf(filled),
+    'the backfilled reading landed on the date the cell named',
+  ).toContain('150');
+  await expect(
+    filled.locator('[data-level-band]'),
+    'and is banded by the same level rule as every other cell',
+  ).toHaveAttribute('data-level-band', 'in-range');
+
+  // It landed there and nowhere else: today's dinner cell is still empty.
+  const todayDinner = await cellAt(await rowFor(phone, 0), 3);
+  expect(
+    await textOf(todayDinner),
+    "a backfilled meal is not also recorded against today",
+  ).not.toMatch(/\d/);
+
+  // An empty night cell opens the night screen for ITS OWN night, ready to be filled in.
+  const emptyNight = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 0);
+  await (await controlIn(emptyNight)).click();
+  const bedtime = phone.getByLabel('Bedtime glucose', { exact: true });
+  await expect(bedtime, 'an empty night cell opens the night screen').toBeVisible();
+  await expect(bedtime, 'with nothing in it, because nothing was recorded for that night').toHaveValue(
+    '',
+  );
+
+  expect(await scrollsHorizontally(phone), 'filling in a cell never widens the page').toBe(false);
+});
+
 test("another account's grid holds none of the owner's readings", async ({ browser }) => {
   const phone = await openHistory(browser, accounts.stranger);
 
@@ -723,6 +862,16 @@ test("another account's grid holds none of the owner's readings", async ({ brows
         .sort(),
       `${view}: the legend still names its four bands`,
     ).toEqual([...(view === 'before' ? LEVEL_BANDS : CHANGE_BANDS)].sort());
-    expect(await controlCount(grid(phone)), `${view}: no cell is tappable`).toBe(0);
+    // Every cell is offered to fill in, because this account's log is empty and backfilling
+    // is what an empty grid is for. That is a control per cell and not one reading.
+    const strangerRow = await rowFor(phone, 3);
+    expect(
+      await controlCount(strangerRow),
+      `${view}: an account with nothing recorded is still offered every cell to fill in`,
+    ).toBe(4);
+    // And not one of them is banded, because no cell has anything behind it -- which is the
+    // stronger statement than counting digits, since day labels carry digits of their own.
+    await expect(strangerRow.locator('[data-level-band]')).toHaveCount(0);
+    await expect(strangerRow.locator('[data-change-band]')).toHaveCount(0);
   }
 });
