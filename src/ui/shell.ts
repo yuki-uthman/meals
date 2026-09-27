@@ -226,9 +226,16 @@ export const shell = (
 
   frame.append(header, main);
 
-  // No navigation on a form: the way out of one is Cancel or Save, and both say
-  // what happens to what has been filled in.
-  if (state.form === undefined && handlers.onNavigate !== undefined) {
+  // No navigation on a form that was reached from the day log: the way out of one
+  // is Cancel or Save, and both say what happens to what has been filled in.
+  //
+  // A form opened FROM a section says which section it came from, and keeps that
+  // section's navigation. Nothing is risked by it: such a form holds an entry that
+  // is already recorded -- History opens a cell's own editor -- so leaving without
+  // saving loses only the correction being made, and the navigation is how the
+  // grid it was opened from is got back to.
+  const onSection = state.form === undefined || state.tab !== undefined;
+  if (onSection && handlers.onNavigate !== undefined) {
     frame.append(bottomNavigation(state, handlers));
   }
 

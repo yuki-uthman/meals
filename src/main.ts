@@ -24,11 +24,8 @@ import {
 } from './domain/entry';
 import {
   historyDates,
-  historyPeriod,
   historyRows,
-  DEFAULT_HISTORY_PERIOD,
-  LONGEST_HISTORY_DAYS,
-  type HistoryPeriodKey,
+  HISTORY_RECORD_START,
   type HistoryView,
   type HistoryWindow,
 } from './domain/history';
@@ -138,19 +135,25 @@ const start = (): void => {
   let lookupToken = 0;
 
   /**
-   * The History grid. The whole of the longest period is read once and the
-   * chosen period bounds what is DRAWN, so switching the view or the period is a
-   * redraw of material already in hand rather than another read. The read is
-   * still bounded: an unbounded grid is exactly what the period exists to stop.
+   * The History grid. The whole record is read once -- for one or two people's log
+   * it is already in hand -- and the grid runs from today back to its earliest
+   * entry, so switching the view is a redraw of material already here rather than
+   * another read, and going further back is scrolling rather than a second page.
    */
   let historyWindow: HistoryWindow | null = null;
   /** The date the grid's rows are counted back from, fixed when the read landed. */
   let historyToday: IsoDate = localToday();
   let historyMessage: string | null = null;
   let historyView: HistoryView = 'before';
-  let historyPeriodKey: HistoryPeriodKey = DEFAULT_HISTORY_PERIOD;
   /** Guards against a slow grid read from an earlier account landing on a later one. */
   let historyToken = 0;
+  /**
+   * The section a form was opened from, when it was not the day log. A form that
+   * came from History keeps History's navigation, which is how the grid is got
+   * back to; a form opened on Today has none, because the way out of one is
+   * Cancel or Save.
+   */
+  let formSection: ShellTab | undefined = undefined;
   /**
    * The meal being looked at, and every instance of its foods. Both are held
    * here rather than in the screen, for the same reason a draft is: the screen
@@ -248,7 +251,12 @@ const start = (): void => {
 
   const mealScreen = (draft: MealDraft): HTMLElement =>
     shell(
-      { date, isToday: date === localToday(), form: { title: mealFormTitle(draft), busy: saving } },
+      {
+        date,
+        isToday: date === localToday(),
+        tab: formSection,
+        form: { title: mealFormTitle(draft), busy: saving },
+      },
       { ...dayHandlers, onCancel: () => leaveForm(), onSave: () => void saveMeal() },
       mealForm(
         {
@@ -302,6 +310,7 @@ const start = (): void => {
       {
         date,
         isToday: date === localToday(),
+        tab: formSection,
         form: { title: NIGHT_FORM_TITLE, busy: saving },
       },
       { ...dayHandlers, onCancel: () => leaveForm(), onSave: () => void saveNight() },
@@ -336,7 +345,9 @@ const start = (): void => {
   const historySectionState = (): HistoryState => {
     if (historyMessage !== null) return { kind: 'failed', message: historyMessage };
     if (historyWindow === null) return { kind: 'loading' };
-    const dates = historyDates(historyToday, historyPeriod(historyPeriodKey).days);
+    // How far back the grid runs is read off the record itself: today back to the
+    // earliest entry, with the floor so a short log still reads as a grid.
+    const dates = historyDates(historyToday, historyWindow);
     return { kind: 'loaded', rows: historyRows(historyWindow, dates, historyView) };
   };
 
@@ -345,21 +356,19 @@ const start = (): void => {
       { date, isToday: date === localToday(), heading: 'History', tab: 'history' },
       dayHandlers,
       historyScreen(
-        { view: historyView, period: historyPeriodKey, state: historySectionState() },
+        { view: historyView, state: historySectionState() },
         {
-          // The view and the period bound and colour what is already in hand, so
-          // choosing one is a redraw and never another read.
+          // The view colours what is already in hand, so choosing one is a redraw
+          // and never another read.
           onView: (next) => {
             historyView = next;
             render();
           },
-          onPeriod: (next) => {
-            historyPeriodKey = next;
-            render();
-          },
           onOpen: (target) => {
             if (target.kind === 'meal') {
-              void openMealDetail(target.id);
+              // A slot cell opens that meal's EDIT form, which is where the after
+              // reading taken two hours later gets added.
+              void editMealFromHistory(target.id, target.eatenOn);
               return;
             }
             void openNightFor(target.nightOn);
@@ -492,8 +501,9 @@ const start = (): void => {
     // nothing stale can survive the read. Only an account change clears it.
     render();
 
-    const from = shiftDate(historyToday, -(LONGEST_HISTORY_DAYS - 1));
-    const outcome = await logStore.historyWindow(from, historyToday);
+    // The whole record, in one read: there is no period to bound it to and no
+    // pagination, so the grid can run back to wherever the earliest entry is.
+    const outcome = await logStore.historyWindow(HISTORY_RECORD_START, historyToday);
     if (token !== historyToken) return;
 
     if (outcome.kind === 'session-ended') {
@@ -520,6 +530,7 @@ const start = (): void => {
     formMessage = null;
     padTarget = null;
     nightPadOpen = false;
+    formSection = undefined;
     screen = 'history';
     await loadHistory();
   };
@@ -603,6 +614,7 @@ const start = (): void => {
     formMessage = null;
     padTarget = null;
     nightPadOpen = false;
+    formSection = undefined;
     screen = 'day';
     date = localToday();
     void loadDayLog();
@@ -638,10 +650,54 @@ const start = (): void => {
 
     clearDetail();
     dayLogState = { kind: 'loaded', log: outcome.log };
-    await openNight();
+    // Opened from the grid, so the night screen keeps History's navigation: that
+    // is how the row it was opened from is got back to.
+    await openNight('history');
   };
 
-  const openNight = async (): Promise<void> => {
+  /**
+   * That meal's own EDIT form, opened from a History cell. The meal is read BY ITS
+   * ID rather than looked up in whatever day happens to be loaded, and the date it
+   * records against is the cell's own date, so finishing an entry from the grid
+   * cannot move the meal to another day.
+   */
+  const editMealFromHistory = async (id: string, eatenOn: IsoDate): Promise<void> => {
+    const found = await logStore.meal(id);
+    if (found.kind === 'session-ended') {
+      await endSession(found.message);
+      return;
+    }
+    if (found.kind !== 'loaded') {
+      // Say so rather than returning quietly: a control that opens nothing cannot
+      // be told from a missed tap.
+      clearDetail();
+      detailRefusal = found.message;
+      screen = 'detail';
+      render();
+      return;
+    }
+
+    if (!(await loadRecentMeals(eatenOn))) return;
+    if (!(await loadMealHistory())) return;
+
+    readToken += 1;
+    date = eatenOn;
+    clearDetail();
+    // The meal's id travels with the draft, so adding the after reading later
+    // updates this row rather than writing a second meal on the date.
+    mealDraft = mealDraftFrom(found.meal, eatenOn);
+    foodDraft = null;
+    nightDraft = null;
+    nightHistory = null;
+    formMessage = null;
+    padTarget = null;
+    nightPadOpen = false;
+    formSection = 'history';
+    screen = 'meal';
+    render();
+  };
+
+  const openNight = async (from: ShellTab | undefined = undefined): Promise<void> => {
     if (dayLogState.kind !== 'loaded') return;
     const recordedNight = dayLogState.log.nightInsulin[0];
     const opening = date;
@@ -671,6 +727,7 @@ const start = (): void => {
     formMessage = null;
     padTarget = null;
     nightPadOpen = false;
+    formSection = from;
     screen = 'night';
     render();
   };
@@ -723,6 +780,7 @@ const start = (): void => {
     nightHistory = null;
     formMessage = null;
     padTarget = null;
+    formSection = undefined;
     screen = 'meal';
     render();
   };
@@ -745,6 +803,7 @@ const start = (): void => {
     nightHistory = null;
     formMessage = null;
     padTarget = null;
+    formSection = undefined;
     screen = 'meal';
     render();
   };
@@ -772,6 +831,7 @@ const start = (): void => {
     nightHistory = null;
     formMessage = null;
     padTarget = null;
+    formSection = undefined;
     screen = 'meal';
     render();
   };
@@ -852,6 +912,7 @@ const start = (): void => {
     formMessage = null;
     padTarget = null;
     nightPadOpen = false;
+    formSection = undefined;
     screen = 'day';
     render();
   };
@@ -919,6 +980,7 @@ const start = (): void => {
       foodDraft = null;
       formMessage = null;
       padTarget = null;
+      formSection = undefined;
       screen = 'day';
       void loadDayLog();
       return;
@@ -961,6 +1023,7 @@ const start = (): void => {
       nightHistory = null;
       formMessage = null;
       nightPadOpen = false;
+      formSection = undefined;
       screen = 'day';
       void loadDayLog();
       return;
@@ -991,6 +1054,7 @@ const start = (): void => {
     saving = false;
     padTarget = null;
     nightPadOpen = false;
+    formSection = undefined;
     // Readings belong to the account that recorded them, so they go with it.
     recentMeals = [];
     // So does the history an estimate would be built from: no estimate may ever be
@@ -1002,7 +1066,6 @@ const start = (): void => {
     historyWindow = null;
     historyMessage = null;
     historyView = 'before';
-    historyPeriodKey = DEFAULT_HISTORY_PERIOD;
     // So do the meals a lookup matches over, and what was typed to search them: a
     // lookup may never reach a meal of the account that has just left.
     lookupToken += 1;
@@ -1071,6 +1134,7 @@ const start = (): void => {
     saving = false;
     padTarget = null;
     nightPadOpen = false;
+    formSection = undefined;
     // A change of hands takes the previous person's readings with it: a chip must
     // never repeat a reading that belongs to somebody else.
     recentMeals = [];
@@ -1082,7 +1146,6 @@ const start = (): void => {
     historyWindow = null;
     historyMessage = null;
     historyView = 'before';
-    historyPeriodKey = DEFAULT_HISTORY_PERIOD;
     // And for the lookup: a search may never match a meal of the previous account's.
     lookupToken += 1;
     lookupMeals = null;

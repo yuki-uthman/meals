@@ -82,47 +82,69 @@ export const historyHeaders = (view: HistoryView): readonly string[] => [
   ...HISTORY_SLOTS.map(slotLabel),
 ];
 
-// ------------------------------------------------------------------ periods
+// --------------------------------------------------- how far back a grid runs
 
-export type HistoryPeriodKey = '2-weeks' | '1-month' | '3-months';
+/**
+ * There are no periods. The grid runs from today back to the EARLIEST recorded
+ * entry and the page scrolls, so going further back is scrolling rather than
+ * finding a chip before older days will appear.
+ *
+ * The floor: a log with one entry still reads as a grid rather than as a single
+ * stranded row. There is no ceiling beyond the earliest entry, so scrolling
+ * stops where the record starts rather than running into an infinite empty past.
+ */
+export const HISTORY_ROW_FLOOR = 14;
 
-export type HistoryPeriod = {
-  readonly key: HistoryPeriodKey;
-  readonly label: string;
-  /** How many calendar dates the grid is bounded to, ending with today. */
-  readonly days: number;
+/**
+ * The date the grid's one read starts from: before any entry can exist, so the
+ * read covers the whole record. For one or two people's log the whole record is
+ * already in hand -- which is why History adds no pagination -- and the earliest
+ * row is then read off what came back rather than guessed at beforehand.
+ */
+export const HISTORY_RECORD_START: IsoDate = '1970-01-01';
+
+/** Whole days since the epoch, so a span is arithmetic and never a timezone. */
+const dayNumber = (date: IsoDate): number => {
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  return Math.round(Date.UTC(year, month - 1, day) / 86_400_000);
+};
+
+const earlier = (a: IsoDate | null, b: IsoDate): IsoDate => (a === null || b < a ? b : a);
+
+/**
+ * The oldest date the record reaches, as a ROW: a meal's own date, and for a
+ * night the date it led into, which is the day after the night record. Null when
+ * the account has recorded nothing at all.
+ */
+export const earliestRecordedDate = (window: HistoryWindow): IsoDate | null => {
+  let earliest: IsoDate | null = null;
+  for (const meal of window.meals) earliest = earlier(earliest, meal.eatenOn);
+  for (const night of window.nights) earliest = earlier(earliest, shiftDate(night.nightOn, 1));
+  return earliest;
 };
 
 /**
- * Three periods, defaulting to a fortnight. Without one the grid would be
- * unbounded, and 'one row per day' needs a range to be one of.
+ * The dates the grid draws, newest first: today back to the earliest recorded
+ * entry, and never fewer than the floor.
  */
-export const HISTORY_PERIODS: readonly HistoryPeriod[] = [
-  { key: '2-weeks', label: '2 weeks', days: 14 },
-  { key: '1-month', label: '1 month', days: 30 },
-  { key: '3-months', label: '3 months', days: 90 },
-];
-
-export const DEFAULT_HISTORY_PERIOD: HistoryPeriodKey = '2-weeks';
-
-export const historyPeriod = (key: HistoryPeriodKey): HistoryPeriod =>
-  HISTORY_PERIODS.find((period) => period.key === key) ?? (HISTORY_PERIODS[0] as HistoryPeriod);
-
-/** The widest period there is: what one read has to cover so that changing the bound is free. */
-export const LONGEST_HISTORY_DAYS: number = HISTORY_PERIODS.reduce(
-  (widest, period) => Math.max(widest, period.days),
-  0,
-);
-
-/** The dates of a period, newest first, ending with today. */
-export const historyDates = (today: IsoDate, days: number): readonly IsoDate[] =>
-  Array.from({ length: days }, (_unused, index) => shiftDate(today, -index));
+export const historyDates = (today: IsoDate, window: HistoryWindow): readonly IsoDate[] => {
+  const earliest = earliestRecordedDate(window);
+  const span = earliest === null ? 0 : dayNumber(today) - dayNumber(earliest) + 1;
+  const days = Math.max(HISTORY_ROW_FLOOR, span);
+  return Array.from({ length: days }, (_unused, index) => shiftDate(today, -index));
+};
 
 // -------------------------------------------------------------------- cells
 
 /** What a populated cell opens. A cell with nothing behind it opens nothing. */
 export type CellTarget =
-  | { readonly kind: 'meal'; readonly id: string }
+  /**
+   * The meal's own row, and the date it was eaten on. The date travels with the
+   * id because opening the cell opens that meal's EDIT form, which records
+   * against a date: taking it from the cell rather than from whatever day happens
+   * to be loaded is what stops an edit moving the meal to another day.
+   */
+  | { readonly kind: 'meal'; readonly id: string; readonly eatenOn: IsoDate }
   /** The night record's own date, which is the day BEFORE the row it appears in. */
   | { readonly kind: 'night'; readonly nightOn: IsoDate };
 
@@ -178,7 +200,7 @@ const mealCell = (
   if (meal === undefined) return EMPTY;
   const before = meal.glucoseBefore;
   const after = meal.glucoseAfter;
-  const target: CellTarget = { kind: 'meal', id: meal.id };
+  const target: CellTarget = { kind: 'meal', id: meal.id, eatenOn: meal.eatenOn };
 
   if (view === 'before') {
     if (before === null) return EMPTY;

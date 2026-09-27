@@ -992,18 +992,18 @@ label {
   box-shadow: inset 0 2px 0 0 var(--accent);
 }
 
-/* The two choosers. They wrap rather than scroll, because nothing on this page
-   is allowed to push the document sideways. */
-.history__views,
-.history__periods {
+/* The one chooser: the view. There is no period, because the grid runs back to
+   the earliest recorded entry and going further back is scrolling. It wraps
+   rather than scrolls, because nothing on this page is allowed to push the
+   document sideways. */
+.history__views {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
 }
 
-.history__view,
-.history__period {
+.history__view {
   flex: 1 1 auto;
   min-width: 0;
   padding: var(--space-2);
@@ -1016,8 +1016,7 @@ label {
   cursor: pointer;
 }
 
-.history__view--on,
-.history__period--on {
+.history__view--on {
   border-color: var(--accent-fill);
   background: var(--accent-fill);
   color: var(--accent-ink);

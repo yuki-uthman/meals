@@ -3,11 +3,9 @@ import {
   historyHeaders,
   historyLegend,
   historyViewLabel,
-  HISTORY_PERIODS,
   HISTORY_VIEWS,
   type CellTarget,
   type FilledCell,
-  type HistoryPeriodKey,
   type HistoryRow,
   type HistoryView,
 } from '../domain/history';
@@ -32,13 +30,11 @@ export type HistoryState =
 
 export type HistoryScreenView = {
   readonly view: HistoryView;
-  readonly period: HistoryPeriodKey;
   readonly state: HistoryState;
 };
 
 export type HistoryHandlers = {
   readonly onView: (view: HistoryView) => void;
-  readonly onPeriod: (period: HistoryPeriodKey) => void;
   readonly onOpen: (target: CellTarget) => void;
   readonly onRetry: () => void;
 };
@@ -54,7 +50,7 @@ const element = (tag: string, className: string, text?: string): HTMLElement => 
 
 /**
  * A chooser entry. It publishes what it has chosen as pressed state rather than
- * as a colour, so which view and which period the grid is on can be read back.
+ * as a colour, so which view the grid is on can be read back.
  */
 const chooser = (
   label: string,
@@ -79,20 +75,6 @@ const viewChooser = (view: HistoryView, handlers: HistoryHandlers): HTMLElement 
     group.append(
       chooser(historyViewLabel(candidate), candidate === view, 'history__view', () =>
         handlers.onView(candidate),
-      ),
-    );
-  }
-  return group;
-};
-
-const periodChooser = (period: HistoryPeriodKey, handlers: HistoryHandlers): HTMLElement => {
-  const group = element('div', 'history__periods');
-  group.setAttribute('role', 'group');
-  group.setAttribute('aria-label', 'How far back the grid goes');
-  for (const candidate of HISTORY_PERIODS) {
-    group.append(
-      chooser(candidate.label, candidate.key === period, 'history__period', () =>
-        handlers.onPeriod(candidate.key),
       ),
     );
   }
@@ -186,7 +168,9 @@ export const historyScreen = (
   handlers: HistoryHandlers,
 ): HTMLElement => {
   const screen = element('div', 'history-screen');
-  screen.append(viewChooser(view.view, handlers), periodChooser(view.period, handlers));
+  // The view and nothing else: there is no period control, because the grid runs
+  // back to the earliest recorded entry and going further back is scrolling.
+  screen.append(viewChooser(view.view, handlers));
 
   if (view.state.kind === 'loading') {
     // Deliberately no grid while the read is in flight: a page of empty outlines
