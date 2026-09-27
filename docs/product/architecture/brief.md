@@ -770,6 +770,7 @@ Show one row per day and one column per slot, in three views of the same pairs, 
 ### Targets
 | Path | Decision | Reason |
 |---|---|---|
+| `src/domain/band.ts` | EXTEND | The level bands themselves change here, so the module that owns the rule is a target. Without it the new 140 boundary has nowhere to exist and the legend would contradict the cells. |
 | `src/domain/history.ts` | CREATE_NEW | The grid projection: a row per day, a cell per column, the value and band each view asks for, as pure functions. |
 | `src/ui/history.ts` | CREATE_NEW | The History screen: the period chips, the view tabs, the legend, the grid and its caption. |
 | `src/ui/shell.ts` | EXTEND | A bottom navigation, so History is reachable at all. |
@@ -820,6 +821,7 @@ functional
 - The legend fits on ONE ROW. Its visible labels are the ranges alone -- 'under 70', '70 ~ 140', '141 ~ 180', 'above 181' for a level, and '−40 or less', '−39 ~ +30', '+31 ~ +60', 'above +60' for a change. Four labels wrapping to a second row push the grid down the screen and read as two groups rather than one scale.
 - A legend entry keeps its MEANING in its accessible name even though the visible text is only the range: 'Low, under 70', 'In range, 70 to 140', 'Elevated, 141 to 180', 'High, 181 and above'. The range alone is what a person reading the colours needs; the word is what anyone not reading the colours needs.
 - The grid's column headers -- the night column, Breakfast, Lunch and Dinner -- are drawn in the ink colour at a heavier weight, not the muted grey the day labels use. They are the labels the whole grid is read against and they now hold the top of the scroll container, so being the quietest thing on the screen was exactly wrong.
+- LevelBand's members change with the thresholds: 'low', 'in-range', 'elevated', 'high' replace 'low', 'in-range', 'high', 'very-high'. 'very-high' is retired outright rather than left unused, because a band nothing can fall into is a rule nobody can read. Every cell, every legend entry and value 4's morning reading publish the new names, and the change bands are untouched.
 
 ### Reuse analysis
 | Symbol | Locator | Decision | Reason |
