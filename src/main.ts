@@ -163,6 +163,26 @@ const start = (): void => {
    */
   let replaceNextEntry = true;
   /**
+   * The route the app was ASKED for, captured ONCE here -- before anything renders
+   * -- together with that entry's own state. Measured otherwise: reloading
+   * #meal/<id> rendered the default day screen first, which rewrote the address to
+   * #today/<date>, and the route then resolved to the address the app had just
+   * invented rather than the one the person opened. A router that reads the address
+   * after its own first paint is reading its own output.
+   *
+   * It stays pending until it has been resolved for a signed-in person, so a link
+   * reopened without a session is not lost to signing in.
+   */
+  let pendingRoute: { readonly hash: string; readonly state: unknown } | null = {
+    hash: window.location.hash,
+    state: window.history.state,
+  };
+  /**
+   * Whether that first resolution has finished. Until it has, NO render may write
+   * the route: a render that wrote one would be the output the router then read.
+   */
+  let routeResolved = false;
+  /**
    * True while a screen is being rebuilt FROM a history entry -- the Back gesture,
    * or a cold load of a route. Nothing is pushed or replaced while it is: the entry
    * the browser is already on is the one the screen belongs to.
@@ -563,7 +583,10 @@ const start = (): void => {
    * it was left at, so coming back restores it rather than starting at the top.
    */
   const syncRoute = (): void => {
-    if (restoringRoute) return;
+    // Nothing is written while a screen is being rebuilt from an entry, and nothing
+    // at all before the route the app was asked for has been resolved: the address
+    // is the question until then, never the answer.
+    if (restoringRoute || !routeResolved) return;
     const route = routeFor();
     const current = window.location.hash;
     if (current === route) {
@@ -752,6 +775,25 @@ const start = (): void => {
     } finally {
       restoringRoute = false;
     }
+  };
+
+  /**
+   * Resolves the route the app was ASKED for, from what was captured at startup
+   * rather than from whatever the address says by now, and only then lets a render
+   * write the address again. The screen that answered it REPLACES the current entry,
+   * so Back from the first screen leaves the site as the person expects.
+   *
+   * A route that is written but never read is a route in name only: reading it is
+   * what makes a URL reloadable, bookmarkable and safe to reopen from a home-screen
+   * shortcut.
+   */
+  const resolveFirstRoute = async (): Promise<void> => {
+    const asked = pendingRoute;
+    pendingRoute = null;
+    await applyRoute(asked?.hash ?? window.location.hash, asked?.state ?? window.history.state);
+    routeResolved = true;
+    replaceNextEntry = true;
+    syncRoute();
   };
 
   window.addEventListener('popstate', (event) => {
@@ -1522,7 +1564,9 @@ const start = (): void => {
     // replaced rather than pushed: Back from the first screen leaves the site.
     date = localToday();
     replaceNextEntry = true;
-    void applyRoute(window.location.hash, window.history.state);
+    // The route the app was asked for, not the one it has since written: a link
+    // reopened while there was no session is answered here, once the person is in.
+    void resolveFirstRoute();
   };
 
   const submit = async (credentials: Credentials): Promise<void> => {
@@ -1555,7 +1599,16 @@ const start = (): void => {
   identity.onChange(showAccount);
   render();
 
-  void identity.currentAccount().then(showAccount);
+  void identity.currentAccount().then((next) => {
+    showAccount(next);
+    if (account !== null) return;
+    // No session, so the sign-in screen is the first screen and says so in the
+    // address: replaced, not pushed, and not absent. The route the person asked for
+    // stays pending until they are in, so a reopened link is not lost to signing in.
+    routeResolved = true;
+    replaceNextEntry = true;
+    syncRoute();
+  });
 };
 
 start();
