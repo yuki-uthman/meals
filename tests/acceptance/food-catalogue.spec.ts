@@ -37,7 +37,11 @@ import { createAccounts, removeAccounts, type SeededAccounts, type Account } fro
  *    nothing, which is judged by typing the name again and finding no such food offered.
  *  - Neither account's catalogue reaches the other, judged in both directions.
  *  - No existing meal changes: the meal seeded three days ago still reads 'Chicken rice 250 g'
- *    and still carries its recorded type, even though the same food is now eaten at 300 g.
+ *    on the day log and still carries its recorded type on its detail, even though the same
+ *    food is now eaten at 300 g. Each claim is made of the screen that renders it: a day log
+ *    card shows a food as name and amount joined, by value 2; the detail shows a food as its
+ *    name, its type and its amount as separate items, by value 6. No type is asserted on the
+ *    day log, because it has never shown one and must not start.
  *
  * Widgets are located tolerantly where the design leaves them to presentation and strictly
  * where it does not. A match item is located by its ACCESSIBLE NAME, because a thing that can
@@ -314,9 +318,14 @@ test('a typed name offers the account\'s own foods, a chosen one brings its type
 
   // Choosing fills the name and takes the type, and the type is NOT asked for again.
   await expect(nameField(phone), 'choosing a food fills its name').toHaveValue('Chicken rice');
-  expect((await bodyText(phone)).toLowerCase(), 'the chosen food shows its type').toContain(
-    'mixed dish',
-  );
+  // Where Add food publishes a type is the match item, which names the food and its type;
+  // the screen is not asked for the type as loose page text, because this design gives it no
+  // other place to render one. That the chosen type reached the RECORD is judged further
+  // down on the meal detail, which is the screen that renders a food's type.
+  await expect(
+    offered(phone, ['Chicken rice', 'Mixed dish']),
+    'the chosen food is the one whose type is Mixed dish',
+  ).toHaveCount(1);
   expect(
     await offersOption(phone, 'Vegetable'),
     'the type chooser is not shown at all once a food is chosen',
@@ -443,11 +452,25 @@ test('a typed name offers the account\'s own foods, a chosen one brings its type
     'the already-recorded meal still says what was eaten, at its own amount',
   ).toContain('Chicken rice 250 g');
 
-  await phone.getByRole('button', { name: 'Edit dinner' }).click();
-  const reopened = await bodyText(phone);
-  expect(reopened, 'the recorded name is unchanged').toContain('Chicken rice');
-  expect(reopened.toLowerCase(), 'the recorded type is unchanged').toContain('mixed dish');
-  await cancel(phone);
+  // The Edit control is still on the card, where value 3 put it and value 6 left it.
+  await expect(
+    past.getByRole('button', { name: /^edit dinner$/i }),
+    'the recorded meal is still editable',
+  ).toHaveCount(1);
+
+  // The recorded TYPE is witnessed on the MEAL DETAIL, which is the screen that renders a
+  // food as its name, its type and its amount -- value 6: "What was eaten lists 'Chicken
+  // rice' with 'Mixed dish' and '250 g'". The day log asserted just above shows a food as
+  // name and amount only, by value 2's design, and is deliberately not asked for a type.
+  const intoDetail = past.getByRole('link').first();
+  await expect(intoDetail, "the recorded dinner's card body opens its detail").toHaveCount(1);
+  await intoDetail.click();
+
+  const detail = phone.getByRole('region', { name: /meal detail/i });
+  const eaten = await textOf(detail);
+  expect(eaten, 'the recorded name is unchanged').toContain('Chicken rice');
+  expect(eaten, 'the recorded type is unchanged').toContain('Mixed dish');
+  expect(eaten, 'the recorded amount is unchanged').toContain('250 g');
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });

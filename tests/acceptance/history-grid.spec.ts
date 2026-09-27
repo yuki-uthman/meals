@@ -14,6 +14,12 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  * against the Supabase CLI local stack, so every number in the grid is what Postgres held
  * and gave back through real row-level security.
  *
+ * Where this oracle backfills a day it goes through the Add food screen as it now stands: a
+ * food is an owned record, so a name the account has never eaten is typed, the offer reading
+ * 'Create "<name>"' is pressed, and only then is the type asked for. That gate is incidental
+ * to what this value is judged on -- it is simply the way a meal is recorded -- but an oracle
+ * that skipped it would wait on a type chooser a correct product has not drawn.
+ *
  * The claims this oracle is built around:
  *
  *  - Reading a row left to right is chronological: the night that led INTO the row's date
@@ -263,6 +269,17 @@ const EMPTY_ROW_DAYS_AGO = [0, 1, 6, 7, 30, 60, 89] as const;
 
 /** The day whose empty dinner cell this oracle backfills through. Nothing is seeded on it. */
 const BACKFILL_DAYS_AGO = 8;
+
+/** The food the backfilled meal is recorded with. The account has never eaten it. */
+const BACKFILL_FOOD = 'Rice';
+
+/**
+ * 'Create "Rice"': the offer a name matching none of the account's own foods makes, and
+ * the press that reveals the type chooser. Spelled out here rather than imported from the
+ * product, because an oracle that borrowed the label from the code under test would agree
+ * with it however the label were changed.
+ */
+const createFoodLabel = (name: string): string => `Create "${name}"`;
 
 // --- Seeding ----------------------------------------------------------------
 
@@ -986,14 +1003,26 @@ test('an empty cell is where a day kept on paper gets filled in', async ({ brows
   );
 
   // Fill in the least a meal may be recorded with: a food, and the reading taken before it.
+  // An amount is not required, so the food is its name and its type and nothing else.
   await phone.getByLabel('Glucose before', { exact: true }).fill('150');
   await phone.getByRole('button', { name: /^add food$/i }).click();
-  await phone.getByLabel('Food name', { exact: true }).fill('Rice');
+  await phone.getByLabel('Food name', { exact: true }).fill(BACKFILL_FOOD);
+  // A food is an owned record, so nothing becomes one on its own: this account has never
+  // eaten a Rice, so the name offers CREATION, and the type chooser appears only once that
+  // offer is pressed. Reaching straight for the type would wait on a control a correct
+  // product has not drawn yet. Had this been a food the account already owned it would be
+  // chosen from the offers instead, which brings its type and asks for none.
+  await phone
+    .getByRole('button', { name: createFoodLabel(BACKFILL_FOOD), exact: true })
+    .click();
   await phone.getByRole('radio', { name: /carb/i }).first().check();
   await phone.getByRole('button', { name: /^save$/i }).click();
   // The food is handed back to the meal before the meal itself is saved, so the second Save
   // is unambiguously the meal's.
-  await expect(phone.getByText(/rice/i), 'the food was kept on the meal').toBeVisible();
+  await expect(
+    phone.getByText(new RegExp(BACKFILL_FOOD, 'i')).first(),
+    'the food was kept on the meal',
+  ).toBeVisible();
   await phone.getByRole('button', { name: /^save$/i }).click();
 
   // Saving records against THAT date rather than today, which is the whole claim: the row
