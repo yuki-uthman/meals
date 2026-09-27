@@ -202,18 +202,26 @@ const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: His
  * anybody recorded, so an account with nothing in its grid still gets one.
  */
 const legend = (view: HistoryView): HTMLElement => {
-  const list = element('ul', 'history__legend');
+  // A plain group of spans rather than a list: a legend entry is one swatch, and
+  // each entry is the banded thing itself, so there is no wrapper between the band
+  // and the words it is published beside.
+  const list = element('div', 'history__legend');
+  list.setAttribute('role', 'group');
   list.setAttribute('aria-label', 'What the colours mean');
   for (const entry of historyLegend(view)) {
-    const item = element('li', 'history__legend-entry');
     const swatch = element('span', 'history__swatch');
     swatch.setAttribute(
       entry.bandKind === 'level' ? 'data-level-band' : 'data-change-band',
       entry.band,
     );
-    swatch.textContent = entry.words;
-    item.append(swatch);
-    list.append(item);
+    // Drawn as the RANGE, because that is what one row has room for and what a
+    // person reading the colours needs; spoken as the MEANING, because the word is
+    // what anyone not reading the colours needs. It is given a role so the name is
+    // honoured rather than being an attribute nothing reads.
+    swatch.setAttribute('role', 'img');
+    swatch.setAttribute('aria-label', entry.words);
+    swatch.textContent = entry.range;
+    list.append(swatch);
   }
   return list;
 };

@@ -413,22 +413,38 @@ export const historyRows = (
 export type LegendEntry = {
   readonly band: LevelBand | ChangeBand;
   readonly bandKind: 'level' | 'change';
-  /** The band named in words, because a coloured square says nothing on its own. */
+  /**
+   * What is DRAWN: the range alone. The legend fits on one row, and four labels
+   * carrying their words wrap to a second, push the grid down the screen and read
+   * as two groups rather than as one scale. The range is also what a person who is
+   * reading the colours actually needs from it.
+   */
+  readonly range: string;
+  /**
+   * What is SPOKEN: the band's meaning, and its range with it. The word is what
+   * anyone not reading the colours needs, so it is kept in the accessible name
+   * rather than dropped along with the visible label.
+   */
   readonly words: string;
 };
 
 const LEVEL_LEGEND: readonly LegendEntry[] = [
-  { band: 'low', bandKind: 'level', words: 'Low, under 70' },
-  { band: 'in-range', bandKind: 'level', words: 'In range, 70 to 180' },
-  { band: 'high', bandKind: 'level', words: 'High, 181 to 250' },
-  { band: 'very-high', bandKind: 'level', words: 'Very high, over 250' },
+  { band: 'low', bandKind: 'level', range: 'under 70', words: 'Low, under 70' },
+  { band: 'in-range', bandKind: 'level', range: '70 ~ 140', words: 'In range, 70 to 140' },
+  { band: 'elevated', bandKind: 'level', range: '141 ~ 180', words: 'Elevated, 141 to 180' },
+  { band: 'high', bandKind: 'level', range: 'above 181', words: 'High, 181 and above' },
 ];
 
 const CHANGE_LEGEND: readonly LegendEntry[] = [
-  { band: 'dropped', bandKind: 'change', words: 'Dropped, 40 or more' },
-  { band: 'stable', bandKind: 'change', words: 'Stable' },
-  { band: 'rose', bandKind: 'change', words: 'Rose, up to 60' },
-  { band: 'rose-high', bandKind: 'change', words: 'Rose sharply, over 60' },
+  { band: 'dropped', bandKind: 'change', range: '−40 or less', words: 'Dropped, −40 or less' },
+  { band: 'stable', bandKind: 'change', range: '−39 ~ +30', words: 'Stable, −39 to +30' },
+  { band: 'rose', bandKind: 'change', range: '+31 ~ +60', words: 'Rose, +31 to +60' },
+  {
+    band: 'rose-high',
+    bandKind: 'change',
+    range: 'above +60',
+    words: 'Rose sharply, above +60',
+  },
 ];
 
 /**

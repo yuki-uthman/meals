@@ -52,8 +52,11 @@
   --band-rose-high: #7c3a0b;
   --band-low: #b42318;
   --band-in-range: #2e7d4f;
-  --band-high: #b45309;
-  --band-very-high: #7c3a0b;
+  /* The level bands as the thresholds now stand: elevated is 141 to 180 and high
+     is 181 and above, with nothing above it. There is no 'very high' token,
+     because there is no longer a band anything could fall into above high. */
+  --band-elevated: #b45309;
+  --band-high: #7c3a0b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -450,12 +453,12 @@ label {
   color: var(--band-in-range);
 }
 
-[data-level-band='high'] {
-  color: var(--band-high);
+[data-level-band='elevated'] {
+  color: var(--band-elevated);
 }
 
-[data-level-band='very-high'] {
-  color: var(--band-very-high);
+[data-level-band='high'] {
+  color: var(--band-high);
 }
 
 /* An empty slot is a statement about the day, not the account's data, so it
@@ -1255,21 +1258,35 @@ label {
   font-size: 0.8125rem;
 }
 
+/* The legend fits on ONE ROW. Four entries wrapping to a second row push the grid
+   down the screen and read as two groups rather than as one scale, so it does not
+   wrap: the entries share the width they have and their labels are the ranges
+   alone, which is what there is room for at 360 px. Nothing here may scroll
+   sideways, so an entry shrinks rather than widening the document. */
 .history__legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: var(--space-1);
   margin: 0;
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2);
+  min-width: 0;
   list-style: none;
 }
 
 .history__swatch {
-  display: inline-block;
-  padding: 0 var(--space-2);
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--space-1) 2px;
   border-radius: var(--space-1);
   color: var(--accent-ink);
-  font-size: 0.6875rem;
+  /* Small, and on one line: the four ranges are the whole width of a phone. */
+  font-size: 0.5625rem;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The bands, by name. The stylesheet is the only thing that knows a colour;
@@ -1284,14 +1301,14 @@ label {
   background: var(--band-in-range);
 }
 
+.history__tap[data-level-band='elevated'],
+.history__swatch[data-level-band='elevated'] {
+  background: var(--band-elevated);
+}
+
 .history__tap[data-level-band='high'],
 .history__swatch[data-level-band='high'] {
   background: var(--band-high);
-}
-
-.history__tap[data-level-band='very-high'],
-.history__swatch[data-level-band='very-high'] {
-  background: var(--band-very-high);
 }
 
 .history__tap[data-change-band='dropped'],
