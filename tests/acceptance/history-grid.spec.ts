@@ -19,17 +19,21 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *  - Reading a row left to right is chronological: the night that led INTO the row's date
  *    (the night record dated the DAY BEFORE it), then breakfast, lunch, dinner.
  *  - The night's morning reading is the one value 4 already derives -- the earliest before
- *    reading on the row's own date -- so the row for today shows 104 in its night cell
- *    because today's breakfast reads 104, and that redundancy is asserted rather than
- *    hidden.
+ *    reading on the row's own date -- so the night cell of the two-days-ago row pairs the
+ *    190 it went to bed at with the 104 that day's breakfast opens on, and that redundancy
+ *    is asserted rather than hidden.
  *  - Before is coloured by LEVEL and Change and Both by CHANGE, and that is checked by the
  *    published band names and by the ABSENCE of the other kind of band anywhere on the
  *    page, which is also what makes the legend switch with the view.
  *  - A band is read off the rule in src/domain/band.ts and never off the size of the
- *    number: today-minus-two's dinner falls 260 to 200, which is −60, and −60 is dropped.
+ *    number: the three-days-ago dinner falls 260 to 200, which is −60, and −60 is dropped.
  *  - Nothing behind a cell means an empty cell: no band, no digits, no control. A meal with
  *    no after reading has no change, so it is empty in Change and Both and still shows its
  *    before reading in Before. A missing measurement is never drawn as a change of zero.
+ *  - There are no period controls. The grid runs from today back to the EARLIEST recorded
+ *    entry with a floor of fourteen rows, and going further back is scrolling.
+ *  - A slot cell opens that meal's EDIT form, which is where the after reading taken two
+ *    hours later gets added; a night cell opens the night screen for that night.
  *
  * Bands are asserted by NAME and never by colour, and widgets are located tolerantly --
  * whether the grid is a table or a list, and how a cell is worded, are presentation
@@ -47,8 +51,12 @@ const CHANGE_CAPTION = 'Colour is the change, not the level. Tap a cell to open 
 const LEVEL_BANDS = ['low', 'in-range', 'high', 'very-high'] as const;
 const CHANGE_BANDS = ['dropped', 'stable', 'rose', 'rose-high'] as const;
 
-/** The default period is 2 weeks, which is fourteen consecutive dates ending with today. */
-const DEFAULT_ROWS = 14;
+/**
+ * The floor: a log with one entry still reads as a grid rather than as a stranded row. The
+ * fixture's oldest entry is four days ago, so fourteen rows is also what this grid shows,
+ * but the claim asserted is the floor and the reach back to the oldest entry, not a period.
+ */
+const MINIMUM_ROWS = 14;
 
 let stack: LocalStack;
 let accounts: SeededAccounts;
@@ -92,35 +100,26 @@ type SeedNight = {
 };
 
 const seedMeals: readonly SeedMeal[] = [
-  // Today. Breakfast is the day's first meal, so its before reading 104 is also the
-  // morning reading of the night that led into today.
-  { daysAgo: 0, slot: 'breakfast', hour: 7, minute: 40, before: 104, after: 186, units: 5 },
-  { daysAgo: 0, slot: 'lunch', hour: 12, minute: 30, before: 150, after: 140, units: 4 },
-  // No after reading yet: no change exists for this meal.
-  { daysAgo: 0, slot: 'dinner', hour: 19, minute: 10, before: 130, units: 6 },
+  // Two days ago. Breakfast is the day's first meal, so its before reading 104 is also the
+  // morning reading of the night that led into this date.
+  { daysAgo: 2, slot: 'breakfast', hour: 7, minute: 40, before: 104, after: 186, units: 5 },
+  { daysAgo: 2, slot: 'lunch', hour: 12, minute: 55, before: 112, after: 133, units: 6 },
+  // No dinner at all: that cell has nothing behind it in every view.
 
-  // Yesterday. No lunch at all, so that cell has nothing behind it in every view.
-  { daysAgo: 1, slot: 'breakfast', hour: 7, minute: 5, before: 64, after: 100, units: 3 },
-  { daysAgo: 1, slot: 'dinner', hour: 19, minute: 0, before: 200, after: 150, units: 7 },
-
-  // Two days ago. No breakfast, so the morning reading of the night before it -- had one
-  // been recorded -- would come from lunch; none is, so that night cell is empty too.
-  { daysAgo: 2, slot: 'lunch', hour: 12, minute: 15, before: 90, after: 120, units: 4 },
+  // Three days ago. No breakfast.
+  { daysAgo: 3, slot: 'lunch', hour: 12, minute: 30, before: 120, after: 165, units: 6 },
   // 260 to 200 is −60: dropped by the rule, whatever the size of the number suggests.
-  { daysAgo: 2, slot: 'dinner', hour: 18, minute: 50, before: 260, after: 200, units: 9 },
+  { daysAgo: 3, slot: 'dinner', hour: 19, minute: 10, before: 260, after: 200, units: 9 },
 
-  // Outside every period but 3 months. Its readings appear nowhere else in the fixture.
-  { daysAgo: 40, slot: 'breakfast', hour: 7, minute: 30, before: 121, after: 151, units: 5 },
+  // Four days ago, and the oldest entry in the record: a before reading and no after, so
+  // there is no change to draw. This is also what the grid must reach back to.
+  { daysAgo: 4, slot: 'breakfast', hour: 8, minute: 0, before: 64, units: 3 },
 ];
 
 const seedNights: readonly SeedNight[] = [
-  // Appears in today's row. Bedtime 260, morning 104: a fall of 156.
-  { daysAgo: 1, bedtime: 260, units: 18 },
-  // Appears in yesterday's row. Bedtime 132, morning 64: a fall of 68.
-  { daysAgo: 2, bedtime: 132, units: 16 },
-  // Appears in the row three days ago, whose date carries no meal, so there is no morning
-  // reading and therefore no change: empty in Change and Both, 190 in Before.
-  { daysAgo: 4, bedtime: 190, units: 14 },
+  // Dated three days ago, so it appears in the row TWO days ago: the night that led into
+  // that date. Bedtime 190, morning 104: a fall of 86.
+  { daysAgo: 3, bedtime: 190, units: 18 },
 ];
 
 // --- What each cell must read ----------------------------------------------
@@ -150,14 +149,17 @@ const NIGHT_NAME = /night|bedtime|overnight/i;
 
 const rows: readonly RowExpectation[] = [
   {
-    daysAgo: 0,
+    daysAgo: 2,
     cells: [
       {
+        // The night dated the DAY BEFORE this row: bedtime 190, and the morning reading
+        // value 4 already derives -- the earliest before reading on this row's own date,
+        // which is breakfast's 104. 104 − 190 is −86.
         column: 0,
         names: NIGHT_NAME,
-        before: { reads: ['260'], band: 'very-high' },
-        change: { reads: ['-156'], band: 'dropped' },
-        both: { reads: ['260', '104'], band: 'dropped' },
+        before: { reads: ['190'], band: 'high' },
+        change: { reads: ['-86'], band: 'dropped' },
+        both: { reads: ['190', '104'], band: 'dropped' },
       },
       {
         column: 1,
@@ -169,62 +171,26 @@ const rows: readonly RowExpectation[] = [
       {
         column: 2,
         names: /lunch/i,
-        before: { reads: ['150'], band: 'in-range' },
-        change: { reads: ['-10'], band: 'stable' },
-        both: { reads: ['150', '140'], band: 'stable' },
+        before: { reads: ['112'], band: 'in-range' },
+        change: { reads: ['+21'], band: 'stable' },
+        both: { reads: ['112', '133'], band: 'stable' },
       },
-      {
-        // Recorded, but with no after reading: a before reading in Before and nothing at
-        // all in Change and Both.
-        column: 3,
-        names: /dinner/i,
-        before: { reads: ['130'], band: 'in-range' },
-        change: null,
-        both: null,
-      },
+      // No dinner was eaten: an empty outline in every view, and not tappable.
+      { column: 3, names: /dinner/i, before: null, change: null, both: null },
     ],
   },
   {
-    daysAgo: 1,
+    daysAgo: 3,
     cells: [
-      {
-        column: 0,
-        names: NIGHT_NAME,
-        before: { reads: ['132'], band: 'in-range' },
-        change: { reads: ['-68'], band: 'dropped' },
-        both: { reads: ['132', '64'], band: 'dropped' },
-      },
-      {
-        column: 1,
-        names: /breakfast/i,
-        before: { reads: ['64'], band: 'low' },
-        change: { reads: ['+36'], band: 'rose' },
-        both: { reads: ['64', '100'], band: 'rose' },
-      },
-      // No lunch was eaten: nothing behind the cell in any view.
-      { column: 2, names: /lunch/i, before: null, change: null, both: null },
-      {
-        column: 3,
-        names: /dinner/i,
-        before: { reads: ['200'], band: 'high' },
-        change: { reads: ['-50'], band: 'dropped' },
-        both: { reads: ['200', '150'], band: 'dropped' },
-      },
-    ],
-  },
-  {
-    daysAgo: 2,
-    cells: [
-      // No night record dated three days ago.
+      // No night record dated four days ago, so this row's night cell is empty.
       { column: 0, names: NIGHT_NAME, before: null, change: null, both: null },
       { column: 1, names: /breakfast/i, before: null, change: null, both: null },
       {
         column: 2,
         names: /lunch/i,
-        // A rise of exactly 30 is still stable: the boundary is closed on the band below.
-        before: { reads: ['90'], band: 'in-range' },
-        change: { reads: ['+30'], band: 'stable' },
-        both: { reads: ['90', '120'], band: 'stable' },
+        before: { reads: ['120'], band: 'in-range' },
+        change: { reads: ['+45'], band: 'rose' },
+        both: { reads: ['120', '165'], band: 'rose' },
       },
       {
         column: 3,
@@ -237,26 +203,26 @@ const rows: readonly RowExpectation[] = [
     ],
   },
   {
-    daysAgo: 3,
+    daysAgo: 4,
     cells: [
+      { column: 0, names: NIGHT_NAME, before: null, change: null, both: null },
       {
-        // The night is recorded but nobody measured the morning after it, so there is no
-        // change to show and none may be invented.
-        column: 0,
-        names: NIGHT_NAME,
-        before: { reads: ['190'], band: 'high' },
+        // Recorded, but nobody has taken the after reading yet: the before reading in
+        // Before, and nothing at all in Change and Both.
+        column: 1,
+        names: /breakfast/i,
+        before: { reads: ['64'], band: 'low' },
         change: null,
         both: null,
       },
-      { column: 1, names: /breakfast/i, before: null, change: null, both: null },
       { column: 2, names: /lunch/i, before: null, change: null, both: null },
       { column: 3, names: /dinner/i, before: null, change: null, both: null },
     ],
   },
 ];
 
-/** The rows of the default period that have nothing behind any cell at all. */
-const EMPTY_ROW_DAYS_AGO = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
+/** The rows within the floor that have nothing behind any cell at all. */
+const EMPTY_ROW_DAYS_AGO = [0, 1, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
 
 // --- Seeding ----------------------------------------------------------------
 
@@ -500,12 +466,22 @@ const chooseView = async (page: Page, view: View): Promise<void> => {
   ).toHaveAttribute('aria-pressed', 'true');
 };
 
-const choosePeriod = async (page: Page, label: RegExp): Promise<void> => {
-  await page.getByRole('button', { name: label }).first().click();
-  await expect(
-    page.getByRole('button', { name: label }).first(),
-    'the chosen period publishes itself as pressed',
-  ).toHaveAttribute('aria-pressed', 'true');
+/**
+ * There are no period controls. Going further back is scrolling, not choosing a bucket, so
+ * a chip offering a window is an extra the design deliberately dropped and its presence is
+ * a falsifier rather than a harmless leftover.
+ */
+const assertNoPeriodControls = async (page: Page): Promise<void> => {
+  for (const label of [/^2 weeks$/i, /^1 month$/i, /^3 months$/i]) {
+    await expect(
+      page.getByRole('button', { name: label }),
+      `no period control named ${label.source}`,
+    ).toHaveCount(0);
+  }
+  expect(
+    await textOf(page.locator('body')),
+    'no period is offered anywhere on the screen',
+  ).not.toMatch(/2 weeks|1 month|3 months/i);
 };
 
 /** Asserts one cell against what that view must show, band by name and reading by reading. */
@@ -583,14 +559,17 @@ test('the grid opens on Before: one row per day, four chronological columns, col
   expect(navText, 'the navigation carries History').toMatch(/history/i);
   expect(navText, 'Settings is in no value and is not built').not.toMatch(/settings/i);
 
-  // The default period is two weeks, which is fourteen dates ending with today.
-  await expect(
-    phone.getByRole('button', { name: /^2 weeks$/i }),
-    'the grid opens on 2 weeks',
-  ).toHaveAttribute('aria-pressed', 'true');
-  await expect(await dayRows(phone), 'one row per calendar date of the period').toHaveCount(
-    DEFAULT_ROWS,
-  );
+  // No period controls: the grid runs from today back to the earliest entry and the page
+  // scrolls, so going further back is scrolling rather than choosing a bucket.
+  await assertNoPeriodControls(phone);
+
+  // One row per calendar date, with the floor of fourteen so a short log still reads as a
+  // grid, and reaching back at least to the oldest entry four days ago.
+  const dayRowCount = await (await dayRows(phone)).count();
+  expect(dayRowCount, 'the grid has a floor of fourteen rows').toBeGreaterThanOrEqual(MINIMUM_ROWS);
+  for (const daysAgo of [0, 4]) {
+    await rowFor(phone, daysAgo);
+  }
 
   // Newest first. Read off each row's LABEL, not its whole text, which runs the label
   // into the first reading.
@@ -598,10 +577,12 @@ test('the grid opens on Before: one row per day, four chronological columns, col
     await textOf(await labelOf((await dayRows(phone)).first())),
     'the newest date is first',
   ).toMatch(dayLabel(0));
-  expect(
-    await textOf(await labelOf((await dayRows(phone)).last())),
-    'the oldest date is last',
-  ).toMatch(dayLabel(DEFAULT_ROWS - 1));
+  for (const daysAgo of [1, MINIMUM_ROWS - 1]) {
+    expect(
+      await textOf(await labelOf((await dayRows(phone)).nth(daysAgo))),
+      `row ${daysAgo + 1} is the date ${daysAgo} day(s) ago`,
+    ).toMatch(dayLabel(daysAgo));
+  }
 
   // The columns, left to right: the night half that is being shown, then the day's meals.
   const gridText = await textOf(grid(phone));
@@ -678,55 +659,35 @@ test('Change shows the signed change and Both shows the two readings, each colou
       `the ${view} view's legend names the four change bands in words`,
     ).toEqual([...CHANGE_BANDS].sort());
 
+    await assertNoPeriodControls(phone);
     expect(await scrollsHorizontally(phone), `the ${view} view fits 360 px`).toBe(false);
   }
 });
 
-test('the period bounds the grid: 2 weeks, 1 month, 3 months', async ({ browser }) => {
+test('tapping a cell opens the entry behind it, where it can be finished or corrected', async ({
+  browser,
+}) => {
   const phone = await openHistory(browser, accounts.owner);
 
-  const twoWeeks = await (await dayRows(phone)).count();
-  expect(twoWeeks, 'two weeks is fourteen dates').toBe(DEFAULT_ROWS);
-  expect(
-    await textOf(grid(phone)),
-    'a meal forty days ago is outside two weeks',
-  ).not.toContain('121');
-
-  await choosePeriod(phone, /^1 month$/i);
-  const oneMonth = await (await dayRows(phone)).count();
-  expect(oneMonth, 'a month is more dates than a fortnight').toBeGreaterThan(twoWeeks);
-  expect(await textOf(grid(phone)), 'forty days ago is outside a month').not.toContain('121');
-  expect(await scrollsHorizontally(phone)).toBe(false);
-
-  await choosePeriod(phone, /^3 months$/i);
-  const threeMonths = await (await dayRows(phone)).count();
-  expect(threeMonths, 'three months is more dates than one').toBeGreaterThan(oneMonth);
-  expect(await textOf(grid(phone)), 'forty days ago is inside three months').toContain('121');
-  expect(await scrollsHorizontally(phone)).toBe(false);
-
-  // And back: the period is a bound the person chooses, not a one-way door.
-  await choosePeriod(phone, /^2 weeks$/i);
-  await expect(await dayRows(phone)).toHaveCount(DEFAULT_ROWS);
-});
-
-test('tapping a cell opens what is behind it', async ({ browser }) => {
-  const phone = await openHistory(browser, accounts.owner);
-
-  // A slot cell opens that meal's detail: today's breakfast, 104 to 186 with its dose.
-  const breakfast = await cellAt(await rowFor(phone, 0), 1);
+  // A slot cell opens that meal's EDIT form, which is where the after reading taken two
+  // hours later gets added. The two-days-ago breakfast reads 104 to 186.
+  const breakfast = await cellAt(await rowFor(phone, 2), 1);
   await (await controlIn(breakfast)).click();
 
-  const detail = phone.getByRole('region', { name: /meal detail/i });
-  const detailText = await textOf(detail);
-  expect(detailText, 'the breakfast cell opened the breakfast').toMatch(/breakfast/i);
-  for (const fragment of ['104', '186', '5 u']) {
-    expect(detailText, `the detail reads ${fragment}`).toContain(fragment);
-  }
+  const before = phone.getByLabel('Glucose before', { exact: true });
+  const after = phone.getByLabel('Glucose after', { exact: true });
+  await expect(before, 'the cell opened a form that can be edited, not a read-only detail').toBeVisible();
+  await expect(
+    phone.getByText(/edit meal/i),
+    'the form is headed for editing an existing meal',
+  ).toBeVisible();
+  await expect(before, "the form holds that meal's own before reading").toHaveValue('104');
+  await expect(after, "the form holds that meal's own after reading").toHaveValue('186');
 
-  // A night cell opens the night screen for that night: the night dated yesterday, which
-  // is the one in today's row, with its bedtime reading of 260.
+  // A night cell opens the night screen for that night: the night dated three days ago,
+  // which is the one shown in the two-days-ago row, with its bedtime reading of 190.
   await navigate(phone, /^history$/i);
-  const night = await cellAt(await rowFor(phone, 0), 0);
+  const night = await cellAt(await rowFor(phone, 2), 0);
   await (await controlIn(night)).click();
 
   const bedtime = phone.getByLabel('Bedtime glucose', { exact: true });
@@ -735,7 +696,7 @@ test('tapping a cell opens what is behind it', async ({ browser }) => {
     phone.getByLabel('Dose', { exact: true }),
     'the night screen is the one value 4 built',
   ).toBeVisible();
-  await expect(bedtime, "the night opened is the row's own night").toHaveValue('260');
+  await expect(bedtime, "the night opened is that row's own night").toHaveValue('190');
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
@@ -750,7 +711,7 @@ test("another account's grid holds none of the owner's readings", async ({ brows
       await chooseView(phone, view);
     }
     const text = await textOf(grid(phone));
-    for (const reading of ['104', '186', '260', '132', '190', '121']) {
+    for (const reading of ['104', '186', '112', '133', '120', '165', '260', '200', '190']) {
       expect(text, `${view}: the owner's ${reading} is not in this grid`).not.toContain(reading);
     }
     // No cell is banded, because no cell has anything behind it. The legend still names
