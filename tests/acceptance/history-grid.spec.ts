@@ -171,7 +171,8 @@ type SeedMeal = {
   readonly slot: 'breakfast' | 'lunch' | 'dinner';
   readonly hour: number;
   readonly minute: number;
-  readonly before: number;
+  /** Absent when the meal was recorded without any reading, which is allowed. */
+  readonly before?: number;
   readonly after?: number;
   readonly units: number;
 };
@@ -198,6 +199,10 @@ const seedMeals: readonly SeedMeal[] = [
   // Four days ago, and the oldest entry in the record: a before reading and no after, so
   // there is no change to draw. This is also what the grid must reach back to.
   { daysAgo: 4, slot: 'breakfast', hour: 8, minute: 0, before: 64, units: 3 },
+  // Four days ago, lunch: recorded with no reading at all. It is an entry, so its cell must
+  // not look like a day with nothing in it -- it is the cell somebody comes back to later to
+  // put the readings in.
+  { daysAgo: 4, slot: 'lunch', hour: 12, minute: 45, units: 4 },
 ];
 
 const seedNights: readonly SeedNight[] = [
@@ -214,14 +219,22 @@ type CellReading = {
   readonly band: string;
 };
 
+/**
+ * What a cell with no reading to show must be. `null` is nothing recorded at all; AWAITING
+ * is an entry that IS recorded but has no reading for this view yet. The two must look
+ * different, because the second is the one somebody comes back to to put the readings in.
+ */
+const AWAITING = 'awaiting' as const;
+type CellState = CellReading | null | typeof AWAITING;
+
 type CellExpectation = {
   /** Which column, left to right: 0 is the night, then breakfast, lunch, dinner. */
   readonly column: 0 | 1 | 2 | 3;
   /** The accessible name of a populated cell must contain this. */
   readonly names: RegExp;
-  readonly before: CellReading | null;
-  readonly change: CellReading | null;
-  readonly both: CellReading | null;
+  readonly before: CellState;
+  readonly change: CellState;
+  readonly both: CellState;
 };
 
 type RowExpectation = {
@@ -294,14 +307,16 @@ const rows: readonly RowExpectation[] = [
       { column: 0, names: NIGHT_NAME, before: null, change: null, both: null },
       {
         // Recorded, but nobody has taken the after reading yet: the before reading in
-        // Before, and nothing at all in Change and Both.
+        // Before, and in Change and Both a cell marked as awaiting its reading -- never
+        // the look of a slot with nothing recorded in it.
         column: 1,
         names: /breakfast/i,
         before: { reads: ['64'], band: 'low' },
-        change: null,
-        both: null,
+        change: AWAITING,
+        both: AWAITING,
       },
-      { column: 2, names: /lunch/i, before: null, change: null, both: null },
+      // Recorded with no reading at all: awaiting in every view.
+      { column: 2, names: /lunch/i, before: AWAITING, change: AWAITING, both: AWAITING },
       { column: 3, names: /dinner/i, before: null, change: null, both: null },
     ],
   },
@@ -346,7 +361,7 @@ const seed = async (owner: Account): Promise<void> => {
         // when the server's offset is not the phone's.
         eaten_on: localDateOnly(day),
         eaten_at: localTime(day, meal.hour, meal.minute),
-        glucose_before: meal.before,
+        ...(meal.before === undefined ? {} : { glucose_before: meal.before }),
         ...(meal.after === undefined ? {} : { glucose_after: meal.after }),
         insulin_units: meal.units,
       })
@@ -885,7 +900,7 @@ const assertCell = async (
   const expected = cell[view];
   const text = normaliseSigns(await textOf(located));
 
-  if (expected === null) {
+  if (expected === null || expected === AWAITING) {
     // Nothing behind it: an empty outline carrying no band and no digits, because a missing
     // measurement is never drawn as a change of zero.
     await expect(located.locator('[data-level-band]'), `${where} carries no level band`).toHaveCount(0);
@@ -901,6 +916,7 @@ const assertCell = async (
     const spokenEmpty = normaliseSigns((await opener.getAttribute('aria-label')) ?? '');
     expect(spokenEmpty, `${where} names its day`).toMatch(dayLabel(row.daysAgo));
     expect(spokenEmpty, `${where} names its column`).toMatch(cell.names);
+    await assertRecordedOrNot(page, located, where, spokenEmpty, expected === AWAITING);
     return;
   }
 
@@ -924,6 +940,39 @@ const assertCell = async (
   expect(spoken, `${where} names its column`).toMatch(cell.names);
   for (const fragment of expected.reads) {
     expect(spoken, `${where} names its reading ${fragment}`).toContain(fragment);
+  }
+};
+
+/**
+ * A slot with nothing recorded and a recorded entry still awaiting its reading must be told
+ * apart, both in words and on sight. Otherwise a meal logged in a hurry with no reading is
+ * lost among ninety days of empty outlines, and cannot be found again to finish it.
+ *
+ * On sight is judged against a reference: the dinner cell two days ago, which has nothing
+ * behind it in any view. An awaiting cell must differ from it in outline or in fill; a
+ * nothing-recorded cell must match it in both.
+ */
+const assertRecordedOrNot = async (
+  page: Page,
+  located: Locator,
+  where: string,
+  spoken: string,
+  awaiting: boolean,
+): Promise<void> => {
+  const look = async (cell: Locator): Promise<string> =>
+    (await controlIn(cell)).evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.borderTopStyle, style.borderTopColor, style.backgroundColor].join(' | ');
+    });
+  const reference = await look(await cellAt(await rowFor(page, 2), 3));
+  const mine = await look(located);
+  if (awaiting) {
+    expect(spoken, `${where} says it is recorded and awaiting a reading`).toMatch(/no reading/i);
+    expect(spoken, `${where} does not claim nothing was recorded`).not.toMatch(/nothing recorded/i);
+    expect(mine, `${where} does not look like a slot with nothing recorded`).not.toBe(reference);
+  } else {
+    expect(spoken, `${where} says nothing was recorded`).toMatch(/nothing recorded/i);
+    expect(mine, `${where} looks like every other slot with nothing recorded`).toBe(reference);
   }
 };
 
