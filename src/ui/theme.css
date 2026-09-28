@@ -1268,6 +1268,19 @@ label {
   background: none;
 }
 
+/* Recorded, but no reading to show yet: a SOLID outline on a soft fill, with a
+   dash, so it is told apart at a glance from the dashed slots with nothing in
+   them. It carries no band, because there is no reading to judge. */
+.history__tap--awaiting {
+  border: 1px solid var(--ink-muted);
+  background: var(--wash);
+  color: var(--ink-muted);
+}
+
+.history__awaiting-mark {
+  font-weight: 700;
+}
+
 /* Both shows two numbers in one cell, so they take a smaller size rather than
    the grid being allowed to overflow. */
 .history__tap--pair {

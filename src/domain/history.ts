@@ -184,7 +184,20 @@ export type EmptyCell = {
   readonly target: CellTarget;
 };
 
-export type HistoryCell = FilledCell | EmptyCell;
+/**
+ * An entry IS recorded, but it has no reading to show in this view: a meal saved
+ * without its readings, or one still waiting for its after reading. It must not
+ * look like a slot with nothing in it, because it is the cell somebody comes back
+ * to later to put the readings in. It opens that entry, never a second one.
+ */
+export type AwaitingCell = {
+  readonly kind: 'awaiting';
+  /** Its day and its column, and that it is recorded with no reading yet. */
+  readonly name: string;
+  readonly target: CellTarget;
+};
+
+export type HistoryCell = FilledCell | EmptyCell | AwaitingCell;
 
 export type HistoryRow = {
   readonly date: IsoDate;
@@ -269,6 +282,13 @@ const empty = (label: string, column: string, target: CellTarget): EmptyCell => 
   target,
 });
 
+/** Recorded, and waiting for the reading this view would show. */
+const awaiting = (label: string, column: string, target: CellTarget): AwaitingCell => ({
+  kind: 'awaiting',
+  name: `${label} ${column} recorded, no reading yet`,
+  target,
+});
+
 const byTimeAscending = (a: RecentMeal, b: RecentMeal): number =>
   a.eatenAt.getTime() - b.eatenAt.getTime();
 
@@ -298,8 +318,8 @@ const mealCell = (
   const target: CellTarget = { kind: 'meal', id: meal.id, eatenOn: meal.eatenOn };
 
   // A meal that is recorded but has no reading to show in this view is still an
-  // entry, so its empty cell opens THAT meal rather than offering a second one.
-  const nothingToShow = (): EmptyCell => empty(label, column, target);
+  // entry: it says so, and it opens THAT meal rather than offering a second one.
+  const nothingToShow = (): AwaitingCell => awaiting(label, column, target);
 
   if (view === 'before') {
     if (before === null) return nothingToShow();
@@ -342,9 +362,9 @@ const nightCell = (
   const target: CellTarget = { kind: 'night', nightOn };
   // Empty or not, a night cell opens the night screen for ITS OWN night, which is
   // that record's own editor and, where there is no record, where one is filled in.
-  const nothingToShow = (): EmptyCell => empty(label, column, target);
-
-  if (night === undefined) return nothingToShow();
+  if (night === undefined) return empty(label, column, target);
+  // A night that IS recorded but has nothing to show here is awaiting a reading.
+  const nothingToShow = (): AwaitingCell => awaiting(label, column, target);
 
   const bedtime = night.bedtimeGlucose;
 

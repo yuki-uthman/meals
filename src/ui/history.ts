@@ -5,6 +5,7 @@ import {
   historyViewLabel,
   HISTORY_VIEWS,
   type CellTarget,
+  type AwaitingCell,
   type EmptyCell,
   type FilledCell,
   type HistoryRow,
@@ -131,6 +132,20 @@ const emptyCell = (cell: EmptyCell, handlers: HistoryHandlers): HTMLElement => {
 };
 
 /**
+ * A recorded entry with no reading to show yet: a solid outline on a soft fill
+ * and a dash, so it stands apart from the dashed slots with nothing in them.
+ */
+const awaitingCell = (cell: AwaitingCell, handlers: HistoryHandlers): HTMLElement => {
+  const control = document.createElement('button');
+  control.className = 'history__tap history__tap--awaiting';
+  control.type = 'button';
+  control.setAttribute('aria-label', cell.name);
+  control.append(element('span', 'history__awaiting-mark', '—'));
+  control.addEventListener('click', () => handlers.onOpen(cell.target));
+  return control;
+};
+
+/**
  * The month a row begins, named across the grid. Over ninety days the short label
  * 'Tue 22' is ambiguous three times over, so this is what tells a person scrolling
  * back which month they have reached.
@@ -197,7 +212,13 @@ const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: His
     line.append(label);
     for (const cell of row.cells) {
       const slot = element('td', 'history__cell');
-      slot.append(cell.kind === 'filled' ? filledCell(cell, handlers) : emptyCell(cell, handlers));
+      slot.append(
+        cell.kind === 'filled'
+          ? filledCell(cell, handlers)
+          : cell.kind === 'awaiting'
+            ? awaitingCell(cell, handlers)
+            : emptyCell(cell, handlers),
+      );
       line.append(slot);
     }
     body.append(line);
