@@ -69,7 +69,7 @@ import {
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { FOOD_FORM_TITLE, foodForm, type NameState } from './ui/food-form';
-import { mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
+import { BACK_TO_HISTORY_LABEL, mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { historyScreen, HISTORY_SCROLLER_CLASS, type HistoryState } from './ui/history';
@@ -80,7 +80,7 @@ import {
   type ChangeWindow,
   type StartWindow,
 } from './domain/nearest-lookup';
-import { shell, type ShellHandlers, type ShellTab } from './ui/shell';
+import { shell, type ShellHandlers, type ShellState, type ShellTab } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
 
 const mount = (): HTMLElement => {
@@ -219,6 +219,12 @@ const start = (): void => {
    * meal that is on screen.
    */
   let detailRefusal: string | null = null;
+  /**
+   * The section the detail was opened FROM, when it was not the day log. It keeps
+   * that section's navigation and names it on the way back, and an edit made from
+   * the detail returns to it on saving.
+   */
+  let detailSection: ShellTab | undefined = undefined;
   let mealDraft: MealDraft | null = null;
   let foodDraft: FoodDraft | null = null;
   /**
@@ -285,20 +291,40 @@ const start = (): void => {
       }),
     );
 
+  /**
+   * The frame a detail sits in. Opened from History it says History rather than a
+   * date: the date being read there is not the meal's, so naming it would be a
+   * small untruth, and stepping it would mean nothing.
+   */
+  const detailFrame = (): ShellState =>
+    detailSection === 'history'
+      ? { date, isToday: date === localToday(), heading: 'History', tab: 'history' }
+      : { date, isToday: date === localToday() };
+
+  const detailBackLabel = (): string | undefined =>
+    detailSection === 'history' ? BACK_TO_HISTORY_LABEL : undefined;
+
   const missingScreen = (message: string): HTMLElement =>
     shell(
-      { date, isToday: date === localToday() },
+      detailFrame(),
       dayHandlers,
-      mealMissingScreen(message, { onBack: () => backToDay() }),
+      mealMissingScreen(message, { onBack: () => backToDay(), backLabel: detailBackLabel() }),
     );
 
   const detailScreen = (meal: Meal): HTMLElement =>
     shell(
-      { date, isToday: date === localToday() },
+      detailFrame(),
       dayHandlers,
       mealDetailScreen(
         { meal, instances: detailInstances, message: detailMessage },
-        { onBack: () => backToDay(), onLogAgain: () => void logAgain(meal) },
+        {
+          onBack: () => backToDay(),
+          backLabel: detailBackLabel(),
+          // The meal's own day is what the edit records against, wherever the
+          // detail was opened from, so correcting it can never move it.
+          onEdit: () => void editMealFromHistory(meal.id, null, detailSection),
+          onLogAgain: () => void logAgain(meal),
+        },
       ),
     );
 
@@ -441,9 +467,10 @@ const start = (): void => {
             // out of it, so leaving the form they opened lands them back here.
             rememberHistoryScroll();
             if (target.kind === 'meal') {
-              // A slot cell opens that meal's EDIT form, which is where the after
-              // reading taken two hours later gets added.
-              void editMealFromHistory(target.id, target.eatenOn);
+              // A slot cell opens that meal's DETAIL, exactly as a Today card does.
+              // Looking is the common case; the detail's Edit control is one tap
+              // further, and is where the after reading taken later gets added.
+              void openMealDetail(target.id, 'history');
               return;
             }
             if (target.kind === 'new-meal') {
@@ -596,7 +623,12 @@ const start = (): void => {
     if (screen === 'night') return `#night/${date}`;
     if (screen === 'food') return '#food';
     if (screen === 'detail') {
-      return detailMeal === null ? '#detail' : `#detail/${detailMeal.id}`;
+      // The section it was opened from is part of its name, so coming back to it
+      // -- by Cancel from its edit form, or by Back -- keeps that section's frame.
+      if (detailMeal === null) return '#detail';
+      return detailSection === undefined
+        ? `#detail/${detailMeal.id}`
+        : `#detail/${detailMeal.id}/${detailSection}`;
     }
     if (screen === 'meal' && mealDraft !== null) {
       // A new entry is named by the date and slot it is being recorded against, so
@@ -807,12 +839,13 @@ const start = (): void => {
       }
 
       if (name === 'detail' && first !== undefined) {
-        if (detailMeal !== null && detailMeal.id === first) {
+        const from = second === 'history' ? 'history' : undefined;
+        if (detailMeal !== null && detailMeal.id === first && detailSection === from) {
           screen = 'detail';
           render();
           return;
         }
-        await openMealDetail(first);
+        await openMealDetail(first, from);
         return;
       }
 
@@ -1057,12 +1090,17 @@ const start = (): void => {
   };
 
   /**
-   * That meal's own EDIT form, opened from a History cell. The meal is read BY ITS
-   * ID rather than looked up in whatever day happens to be loaded, and the date it
-   * records against is the cell's own date, so finishing an entry from the grid
-   * cannot move the meal to another day.
+   * That meal's own EDIT form, opened from a meal detail or from the meal's own
+   * URL. The meal is read BY ITS ID rather than looked up in whatever day happens
+   * to be loaded, and the date it records against is the meal's own date, so
+   * finishing an entry cannot move the meal to another day. `from` is the section
+   * a save returns to; with none it returns to the day log for that date.
    */
-  const editMealFromHistory = async (id: string, eatenOn: IsoDate | null): Promise<void> => {
+  const editMealFromHistory = async (
+    id: string,
+    eatenOn: IsoDate | null,
+    from: ShellTab | undefined = 'history',
+  ): Promise<void> => {
     const found = await logStore.meal(id);
     if (found.kind === 'session-ended') {
       await endSession(found.message);
@@ -1073,6 +1111,7 @@ const start = (): void => {
       // be told from a missed tap.
       clearDetail();
       detailRefusal = found.message;
+      detailSection = from;
       screen = 'detail';
       render();
       return;
@@ -1097,7 +1136,7 @@ const start = (): void => {
     formMessage = null;
     padTarget = null;
     nightPadOpen = false;
-    formSection = 'history';
+    formSection = from;
     screen = 'meal';
     render();
   };
@@ -1272,6 +1311,7 @@ const start = (): void => {
     detailInstances = [];
     detailMessage = null;
     detailRefusal = null;
+    detailSection = undefined;
   };
 
   /**
@@ -1281,7 +1321,7 @@ const start = (): void => {
    * A history that could not be read says so rather than reading as a meal eaten
    * once.
    */
-  const openMealDetail = async (id: string): Promise<void> => {
+  const openMealDetail = async (id: string, from?: ShellTab): Promise<void> => {
     // The meal is read BY ITS ID, never looked up in whatever day log happens
     // to be loaded: a snapshot of one date cannot answer for a meal on another,
     // and a lookup that missed could only return quietly.
@@ -1292,6 +1332,7 @@ const start = (): void => {
     }
 
     clearDetail();
+    detailSection = from;
     mealDraft = null;
     foodDraft = null;
     nightDraft = null;

@@ -2,6 +2,7 @@ import { changeBand } from '../domain/band';
 import {
   changeText,
   doseText,
+  editMealLabel,
   foodTypeLabel,
   glucoseChange,
   slotLabel,
@@ -32,11 +33,22 @@ export type MealDetailView = {
 
 export type MealDetailHandlers = {
   readonly onBack: () => void;
+  /**
+   * What the way back says. The detail is reached from more than one section, and
+   * 'Back to the day' read from History would name a screen the person never left.
+   */
+  readonly backLabel?: string | undefined;
+  /**
+   * Opens this meal's EDIT form. Reading and correcting are two acts: the detail
+   * opens first so a meal can be looked at without the risk of changing it.
+   */
+  readonly onEdit?: () => void;
   /** Opens a new meal holding only this meal's foods and amounts. */
   readonly onLogAgain?: () => void;
 };
 
 export const BACK_LABEL = 'Back to the day';
+export const BACK_TO_HISTORY_LABEL = 'Back to History';
 
 /**
  * The control's name says what travels. 'Log again' alone would leave a person
@@ -202,7 +214,7 @@ export const mealMissingScreen = (message: string, handlers: MealDetailHandlers)
   const back = document.createElement('button');
   back.className = 'button button--quiet';
   back.type = 'button';
-  back.textContent = BACK_LABEL;
+  back.textContent = handlers.backLabel ?? BACK_LABEL;
   back.addEventListener('click', () => handlers.onBack());
 
   const notice = element('p', 'notice', message);
@@ -221,10 +233,21 @@ export const mealDetailScreen = (
   const back = document.createElement('button');
   back.className = 'button button--quiet';
   back.type = 'button';
-  back.textContent = BACK_LABEL;
+  back.textContent = handlers.backLabel ?? BACK_LABEL;
   back.addEventListener('click', () => handlers.onBack());
 
   screen.append(back, detailRegion(view.meal));
+
+  // The same control, and the same name, the Today card carries: 'Edit dinner'.
+  if (handlers.onEdit !== undefined) {
+    const onEdit = handlers.onEdit;
+    const edit = document.createElement('button');
+    edit.className = 'button button--edit';
+    edit.type = 'button';
+    edit.textContent = editMealLabel(view.meal.slot);
+    edit.addEventListener('click', () => onEdit());
+    screen.append(edit);
+  }
 
   // Repeating needs foods to copy, so a meal recorded without any offers nothing.
   if (view.meal.foods.length > 0) {
