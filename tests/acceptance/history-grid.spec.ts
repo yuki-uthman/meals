@@ -1131,14 +1131,30 @@ test('tapping a cell opens the entry behind it, where it can be finished or corr
 }) => {
   const phone = await openHistory(browser, accounts.owner);
 
-  // A slot cell opens that meal's EDIT form, which is where the after reading taken two
-  // hours later gets added. The two-days-ago breakfast reads 104 to 186.
+  // A slot cell opens that meal's DETAIL first, exactly as a Today card does: looking is
+  // the common case, and a tap that went straight into an editor would put a meal one
+  // stray keystroke from being changed. The two-days-ago breakfast reads 104 to 186.
   const breakfast = await cellAt(await rowFor(phone, 2), 1);
   await (await controlIn(breakfast)).click();
 
+  const detail = phone.getByRole('region', { name: /meal detail/i });
+  await expect(detail, 'the cell opened the meal detail').toBeVisible();
+  const summary = (await detail.textContent()) ?? '';
+  expect(summary, 'the detail is the breakfast behind the cell').toContain('Breakfast');
+  expect(summary, "the detail reads that meal's before").toContain('104');
+  expect(summary, "the detail reads that meal's after").toContain('186');
+  await expect(
+    phone.getByLabel('Glucose before', { exact: true }),
+    'the detail is not an editor',
+  ).toHaveCount(0);
+
+  // Correcting it is one deliberate tap further: the detail's own Edit control opens the
+  // EDIT form, which is where the after reading taken two hours later gets added.
+  await phone.getByRole('button', { name: /^edit breakfast$/i }).click();
+
   const before = phone.getByLabel('Glucose before', { exact: true });
   const after = phone.getByLabel('Glucose after', { exact: true });
-  await expect(before, 'the cell opened a form that can be edited, not a read-only detail').toBeVisible();
+  await expect(before, "the detail's Edit control opened a form that can be edited").toBeVisible();
   await expect(
     phone.getByText(/edit meal/i),
     'the form is headed for editing an existing meal',
@@ -1281,16 +1297,28 @@ test('an empty cell is where a day kept on paper gets filled in', async ({ brows
 test('leaving a form opened from a cell returns to the grid, not to Today', async ({ browser }) => {
   const phone = await openHistory(browser, accounts.owner);
 
-  // A slot cell leads to the edit form; Cancel is 'every other way of leaving' it, and it
-  // must lead BACK to the grid the cell was tapped in. Sending it to Today would throw away
-  // where the person was, which is worst exactly where it matters most: part-way down ninety
-  // rows of somebody else's handwriting being copied in.
+  // A slot cell leads to the detail, and its Edit control to the edit form. Cancel is
+  // 'every other way of leaving' the form, and it must lead BACK to the screen it was
+  // opened from -- the detail -- whose own way back leads to the grid the cell was tapped
+  // in. Sending either to Today would throw away where the person was, which is worst
+  // exactly where it matters most: part-way down ninety rows of somebody else's
+  // handwriting being copied in.
   const breakfast = await cellAt(await rowFor(phone, 2), 1);
   await (await controlIn(breakfast)).click();
+  const detail = phone.getByRole('region', { name: /meal detail/i });
+  await expect(detail).toBeVisible();
+  await phone.getByRole('button', { name: /^edit breakfast$/i }).click();
   await expect(phone.getByLabel('Glucose before', { exact: true })).toBeVisible();
 
   await phone.getByRole('button', { name: /^cancel$/i }).click();
-  await expect(grid(phone), 'cancelling an edit opened from a cell returns to History').toBeVisible();
+  await expect(detail, 'cancelling an edit opened from the detail returns to the detail').toBeVisible();
+  await expect(
+    phone.getByRole('navigation', { name: /sections/i }).getByRole('button', { name: /^history$/i }),
+    'the detail opened from History still says it is in History',
+  ).toHaveAttribute('aria-current', 'page');
+
+  await phone.getByRole('button', { name: /^back to history$/i }).click();
+  await expect(grid(phone), 'the way back from a detail opened from a cell returns to History').toBeVisible();
   await expect(
     phone.getByRole('heading', { name: /^today$/i }),
     'and not to Today, which is not where the person was',
@@ -1737,14 +1765,26 @@ test("a meal's own URL reloads to that meal, because the screen's identity is in
   await expectRoute(phone, /^#history/, 'the History route');
 
   // The two-days-ago breakfast, 104 to 186. Opening it must change the route: that is what
-  // makes a reload and a Back possible at all.
+  // makes a reload and a Back possible at all. The cell opens the detail, and its Edit
+  // control the form, and each is its own route.
   await (await controlIn(await cellAt(await rowFor(phone, 2), 1))).click();
+  const detail = phone.getByRole('region', { name: /meal detail/i });
+  await expect(detail).toContainText('186');
+  await expectRoute(phone, /^#detail\/.+/, "that meal's detail route");
+  const detailUrl = phone.url();
+
+  // A hash route rather than a path because GitHub Pages serves static files, so this reload
+  // is also the assertion that the route survives being asked for cold.
+  await phone.reload();
+  await expect(detail, 'the detail URL reloads to that meal').toContainText('104');
+  await expect(detail).toContainText('186');
+  expect(phone.url(), 'and the URL is unchanged by the reload').toBe(detailUrl);
+
+  await phone.getByRole('button', { name: /^edit breakfast$/i }).click();
   await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('104');
   await expectRoute(phone, /^#meal\/.+/, "that meal's own route");
   const mealUrl = phone.url();
 
-  // A hash route rather than a path because GitHub Pages serves static files, so this reload
-  // is also the assertion that the route survives being asked for cold.
   await phone.reload();
   await expect(
     phone.getByLabel('Glucose before', { exact: true }),
@@ -1810,7 +1850,7 @@ test('after signing out, Back cannot walk back into the account that just left',
 
   // Deep enough in that there are entries behind this one for Back to find.
   await (await controlIn(await cellAt(await rowFor(phone, 2), 1))).click();
-  await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('104');
+  await expect(phone.getByRole('region', { name: /meal detail/i })).toContainText('104');
   await phone.goBack();
   await expect(grid(phone)).toBeVisible();
 

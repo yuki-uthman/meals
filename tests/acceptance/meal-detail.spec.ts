@@ -322,3 +322,31 @@ test('opening a meal shows what was eaten and every instance of the same foods, 
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
+
+test('the detail offers an Edit control, so a meal is read first and corrected on purpose', async ({
+  browser,
+}) => {
+  const phone = await openPhone(browser);
+  await signIn(phone, accounts.owner);
+
+  await (await card(phone, 'Dinner')).getByRole('link').first().click();
+  const detail = phone.getByRole('region', { name: /meal detail/i });
+  await expect(detail).toBeVisible();
+
+  // One Edit control, named for the meal's slot as the card's is.
+  const edit = phone.getByRole('button', { name: /^edit dinner$/i });
+  await expect(edit, 'the detail carries exactly one Edit control').toHaveCount(1);
+  await edit.click();
+
+  // It opens this meal's EDIT form with its own readings in place.
+  await expect(phone.getByText(/edit meal/i)).toBeVisible();
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('110');
+  await expect(phone.getByLabel('Glucose after', { exact: true })).toHaveValue('142');
+
+  // Leaving the form without saving returns to the detail it was opened from.
+  await phone.getByRole('button', { name: /^cancel$/i }).click();
+  await expect(detail, 'Cancel returns to the detail').toBeVisible();
+  await expect(detail).toContainText('Chicken rice');
+
+  expect(await scrollsHorizontally(phone)).toBe(false);
+});
