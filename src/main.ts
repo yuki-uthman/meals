@@ -69,7 +69,10 @@ import {
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { FOOD_FORM_TITLE, foodForm, type NameState } from './ui/food-form';
-import { BACK_TO_HISTORY_LABEL, mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
+import {
+  BACK_TO_HISTORY_LABEL,
+  BACK_TO_LOOKUP_LABEL,
+  mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
 import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { historyScreen, HISTORY_SCROLLER_CLASS, type HistoryState } from './ui/history';
@@ -292,17 +295,26 @@ const start = (): void => {
     );
 
   /**
-   * The frame a detail sits in. Opened from History it says History rather than a
-   * date: the date being read there is not the meal's, so naming it would be a
-   * small untruth, and stepping it would mean nothing.
+   * The frame a detail sits in. Opened from History or Lookup it says that section
+   * rather than a date: the date being read there is not the meal's, so naming it
+   * would be a small untruth, and stepping it would mean nothing.
    */
-  const detailFrame = (): ShellState =>
-    detailSection === 'history'
-      ? { date, isToday: date === localToday(), heading: 'History', tab: 'history' }
-      : { date, isToday: date === localToday() };
+  const detailFrame = (): ShellState => {
+    if (detailSection === 'history') {
+      return { date, isToday: date === localToday(), heading: 'History', tab: 'history' };
+    }
+    if (detailSection === 'lookup') {
+      return { date, isToday: date === localToday(), heading: 'Lookup', tab: 'lookup' };
+    }
+    return { date, isToday: date === localToday() };
+  };
 
   const detailBackLabel = (): string | undefined =>
-    detailSection === 'history' ? BACK_TO_HISTORY_LABEL : undefined;
+    detailSection === 'history'
+      ? BACK_TO_HISTORY_LABEL
+      : detailSection === 'lookup'
+        ? BACK_TO_LOOKUP_LABEL
+        : undefined;
 
   const missingScreen = (message: string): HTMLElement =>
     shell(
@@ -543,7 +555,7 @@ const start = (): void => {
             lookupStartWindow = bound;
             render();
           },
-          onOpen: (id) => void openMealDetail(id),
+          onOpen: (id) => void openMealDetail(id, 'lookup'),
           onRetry: () => void retryLookup(),
         },
       ),
@@ -839,7 +851,7 @@ const start = (): void => {
       }
 
       if (name === 'detail' && first !== undefined) {
-        const from = second === 'history' ? 'history' : undefined;
+        const from = second === 'history' || second === 'lookup' ? second : undefined;
         if (detailMeal !== null && detailMeal.id === first && detailSection === from) {
           screen = 'detail';
           render();
@@ -996,6 +1008,18 @@ const start = (): void => {
 
   /** Reading again after a failure, from the screen's own Try again control. */
   const retryLookup = async (): Promise<void> => {
+    if (await loadLookup()) render();
+  };
+
+  /**
+   * Back to Lookup after an edit made from one of its results. The meals are
+   * re-read so the corrected entry is what the results reflect, but the question
+   * being asked -- the tab, what was typed, the windows -- is kept: the person was
+   * part-way through a search, not starting a new one.
+   */
+  const returnToLookup = async (): Promise<void> => {
+    clearDetail();
+    screen = 'lookup';
     if (await loadLookup()) render();
   };
 
@@ -1575,6 +1599,10 @@ const start = (): void => {
       replaceNextEntry = true;
       if (from === 'history') {
         void openHistorySection();
+        return;
+      }
+      if (from === 'lookup') {
+        void returnToLookup();
         return;
       }
       screen = 'day';

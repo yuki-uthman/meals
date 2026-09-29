@@ -49,6 +49,7 @@ export type MealDetailHandlers = {
 
 export const BACK_LABEL = 'Back to the day';
 export const BACK_TO_HISTORY_LABEL = 'Back to History';
+export const BACK_TO_LOOKUP_LABEL = 'Back to Lookup';
 
 /**
  * The control's name says what travels. 'Log again' alone would leave a person
