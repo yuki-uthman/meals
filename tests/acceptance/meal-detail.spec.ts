@@ -336,6 +336,21 @@ test('the detail offers an Edit control, so a meal is read first and corrected o
   // One Edit control, named for the meal's slot as the card's is.
   const edit = phone.getByRole('button', { name: /^edit dinner$/i });
   await expect(edit, 'the detail carries exactly one Edit control').toHaveCount(1);
+
+  // It is a pill ON the meal's card, at its top right: inside the detail region, on the
+  // same row as the slot label, and against the card's right edge -- not a row of its own.
+  await expect(detail.getByRole('button', { name: /^edit dinner$/i }), 'Edit is on the card').toHaveCount(1);
+  const box = await detail.boundingBox();
+  const pill = await edit.boundingBox();
+  const slot = await detail.getByText('Dinner', { exact: true }).boundingBox();
+  if (box === null || pill === null || slot === null) throw new Error('the card, pill or slot has no box');
+  expect(pill.y, 'the pill shares the slot label row').toBeLessThan(slot.y + slot.height);
+  expect(pill.y + pill.height, 'the pill shares the slot label row').toBeGreaterThan(slot.y);
+  expect(pill.x, 'the pill is to the right of the slot label').toBeGreaterThan(slot.x + slot.width);
+  expect(box.x + box.width - (pill.x + pill.width), 'the pill sits at the right edge').toBeLessThan(32);
+  const radius = await edit.evaluate((node) => parseFloat(getComputedStyle(node).borderTopLeftRadius));
+  expect(radius, 'the pill has fully rounded ends').toBeGreaterThanOrEqual(pill.height / 2);
+
   await edit.click();
 
   // It opens this meal's EDIT form with its own readings in place.
