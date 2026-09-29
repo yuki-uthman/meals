@@ -336,6 +336,7 @@ test('the detail offers an Edit control, so a meal is read first and corrected o
   // One Edit control, named for the meal's slot as the card's is.
   const edit = phone.getByRole('button', { name: /^edit dinner$/i });
   await expect(edit, 'the detail carries exactly one Edit control').toHaveCount(1);
+  await expect(edit, 'the pill reads Edit alone; the slot is in its accessible name').toHaveText('Edit');
 
   // It is a pill ON the meal's card, at its top right: inside the detail region, on the
   // same row as the slot label, and against the card's right edge -- not a row of its own.
