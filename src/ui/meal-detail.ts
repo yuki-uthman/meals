@@ -129,14 +129,15 @@ const foodList = (foods: readonly FoodPortion[]): HTMLElement => {
 
 /**
  * The Edit pill, in the card's own head at the top right, as the Today card carries
- * it: 'Edit dinner'. It sits on the meal it edits rather than in a row of its own,
- * so there is no doubt which meal it opens.
+ * it. It reads 'Edit' because it sits on the meal it edits; its accessible name
+ * still says which, 'Edit dinner', for anyone not seeing where it sits.
  */
 const editPill = (meal: Meal, onEdit: () => void): HTMLElement => {
   const edit = document.createElement('button');
   edit.className = 'button button--edit detail__edit';
   edit.type = 'button';
-  edit.textContent = editMealLabel(meal.slot);
+  edit.setAttribute('aria-label', editMealLabel(meal.slot));
+  edit.textContent = 'Edit';
   edit.addEventListener('click', () => onEdit());
   return edit;
 };
