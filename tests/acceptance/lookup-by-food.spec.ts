@@ -501,6 +501,60 @@ test('a result opens that meal', async ({ browser }) => {
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
 
+test('a detail opened from Lookup stays in Lookup, and its edit returns to the same search', async ({
+  browser,
+}) => {
+  const phone = await openLookup(browser, accounts.owner);
+  await typeQuery(phone, 'rice');
+  await expect(await resultRows(phone)).toHaveCount(4);
+  await (await controlIn((await resultRows(phone)).first())).click();
+
+  const detail = phone.getByRole('region', { name: /meal detail/i });
+  await expect(detail).toBeVisible();
+
+  // The frame says Lookup, not a date: the date being read is today, and the meal is from
+  // two days ago, so a date above the detail would name a day the meal was not eaten on.
+  await expect(
+    phone.getByRole('heading', { level: 1, name: /^lookup$/i }),
+    'the detail opened from Lookup is headed Lookup',
+  ).toBeVisible();
+  await expect(
+    phone.getByRole('heading', { level: 1, name: /^today$/i }),
+    'and not Today',
+  ).toHaveCount(0);
+  await expect(
+    navigation(phone).getByRole('button', { name: /^lookup$/i }),
+    'the Lookup section stays the current one',
+  ).toHaveAttribute('aria-current', 'page');
+
+  // Edit, then Cancel: back to the detail it was opened from.
+  await phone.getByRole('button', { name: /^edit dinner$/i }).click();
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('110');
+  await phone.getByRole('button', { name: /^cancel$/i }).click();
+  await expect(detail, 'Cancel returns to the detail').toBeVisible();
+
+  // The way back names Lookup and returns to the search in progress, not a blank one.
+  await phone.getByRole('button', { name: /^back to lookup$/i }).click();
+  await expect(searchField(phone), 'the search is kept').toHaveValue('rice');
+  await expect(await resultRows(phone)).toHaveCount(4);
+
+  // Saving an edit made from a result returns to Lookup, with the search still asked.
+  await (await controlIn((await resultRows(phone)).first())).click();
+  await phone.getByRole('button', { name: /^edit dinner$/i }).click();
+  await expect(phone.getByLabel('Glucose before', { exact: true })).toHaveValue('110');
+  await phone.getByRole('button', { name: /^save$/i }).click();
+  await expect(searchField(phone), 'saving returns to Lookup with the search kept').toHaveValue(
+    'rice',
+  );
+  await expect(await resultRows(phone)).toHaveCount(4);
+  await expect(
+    phone.getByRole('heading', { level: 1, name: /^today$/i }),
+    'and not to Today',
+  ).toHaveCount(0);
+
+  expect(await scrollsHorizontally(phone)).toBe(false);
+});
+
 test('a food never eaten has no summary and says so', async ({ browser }) => {
   const phone = await openLookup(browser, accounts.owner);
 
