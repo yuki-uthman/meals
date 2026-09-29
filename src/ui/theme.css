@@ -551,10 +551,25 @@ label {
 
 .detail__head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
+}
+
+/* The slot and the time, together on the left so the Edit pill owns the right. */
+.detail__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* A pill, and never shrunk or wrapped off the head's row. */
+.detail__edit {
+  flex: none;
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
 }
 
 /* The slot label is furniture, exactly as it is on a card. */

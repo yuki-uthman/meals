@@ -127,14 +127,31 @@ const foodList = (foods: readonly FoodPortion[]): HTMLElement => {
   return list;
 };
 
-const detailRegion = (meal: Meal): HTMLElement => {
+/**
+ * The Edit pill, in the card's own head at the top right, as the Today card carries
+ * it: 'Edit dinner'. It sits on the meal it edits rather than in a row of its own,
+ * so there is no doubt which meal it opens.
+ */
+const editPill = (meal: Meal, onEdit: () => void): HTMLElement => {
+  const edit = document.createElement('button');
+  edit.className = 'button button--edit detail__edit';
+  edit.type = 'button';
+  edit.textContent = editMealLabel(meal.slot);
+  edit.addEventListener('click', () => onEdit());
+  return edit;
+};
+
+const detailRegion = (meal: Meal, onEdit: (() => void) | undefined): HTMLElement => {
   const section = document.createElement('section');
   section.className = 'detail';
   section.setAttribute('aria-label', 'Meal detail');
 
   const head = element('div', 'detail__head');
-  head.append(element('p', 'detail__slot', slotLabel(meal.slot)));
-  head.append(recorded('p', 'detail__when', eatenAtText(meal.eatenAt)));
+  const title = element('div', 'detail__title');
+  title.append(element('p', 'detail__slot', slotLabel(meal.slot)));
+  title.append(recorded('p', 'detail__when', eatenAtText(meal.eatenAt)));
+  head.append(title);
+  if (onEdit !== undefined) head.append(editPill(meal, onEdit));
   section.append(head);
 
   section.append(summary(meal));
@@ -237,18 +254,7 @@ export const mealDetailScreen = (
   back.textContent = handlers.backLabel ?? BACK_LABEL;
   back.addEventListener('click', () => handlers.onBack());
 
-  screen.append(back, detailRegion(view.meal));
-
-  // The same control, and the same name, the Today card carries: 'Edit dinner'.
-  if (handlers.onEdit !== undefined) {
-    const onEdit = handlers.onEdit;
-    const edit = document.createElement('button');
-    edit.className = 'button button--edit';
-    edit.type = 'button';
-    edit.textContent = editMealLabel(view.meal.slot);
-    edit.addEventListener('click', () => onEdit());
-    screen.append(edit);
-  }
+  screen.append(back, detailRegion(view.meal, handlers.onEdit));
 
   // Repeating needs foods to copy, so a meal recorded without any offers nothing.
   if (view.meal.foods.length > 0) {
