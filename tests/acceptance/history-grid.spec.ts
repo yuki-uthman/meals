@@ -22,12 +22,15 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *
  * The claims this oracle is built around:
  *
- *  - Reading a row left to right is chronological: the night that led INTO the row's date
- *    (the night record dated the DAY BEFORE it), then breakfast, lunch, dinner.
- *  - The night's morning reading is the one value 4 already derives -- the earliest before
- *    reading on the row's own date -- so the night cell of the two-days-ago row pairs the
- *    190 it went to bed at with the 104 that day's breakfast opens on, and that redundancy
- *    is asserted rather than hidden.
+ *  - Reading a row left to right is the day as it happened: breakfast, lunch, dinner, then
+ *    that day's OWN night (the night record dated the row's date), to the right of dinner.
+ *  - The night's morning reading is the one value 4 derives -- the before reading of the
+ *    NEXT day's breakfast -- so the night cell of the three-days-ago row pairs the 190 it
+ *    went to bed at with the 104 the next day's breakfast opens on. A night whose next day
+ *    has no breakfast reading is awaiting its morning, even where a later meal that day has
+ *    a before reading: the four-days-ago night goes to bed at 175 and the next day's first
+ *    reading is a lunch's 120, which is not a morning reading. The morning is never typed
+ *    into the night; it fills itself in once that breakfast is recorded.
  *  - Before is coloured by LEVEL and Change and Both by CHANGE, and that is checked by the
  *    published band names and by the ABSENCE of the other kind of band anywhere on the
  *    page, which is also what makes the legend switch with the view.
@@ -63,9 +66,9 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *    the grid scrolls underneath, and the scrolling content reserves room for it, so the last
  *    day row and a form's lowest control clear the bar instead of sitting behind it -- the
  *    classic fixed-bar failure, and invisible to anyone testing on a desktop window.
- *  - A slot cell with a meal behind it opens that meal's EDIT form, which is where the after
- *    reading taken two hours later gets added; a night cell opens the night screen for that
- *    night.
+ *  - A slot cell with a meal behind it opens that meal's detail, whose Edit control opens
+ *    its EDIT form, which is where the after reading taken two hours later gets added; a
+ *    night cell opens the night screen for that night, which has no morning field.
  *  - In-app navigation goes through the BROWSER'S HISTORY, so the device's Back gesture does
  *    what Cancel does -- returns to the screen the form was opened FROM, at the scroll position
  *    it was left at -- rather than leaving the site. On Android Back is the primary way people
@@ -178,15 +181,15 @@ type SeedMeal = {
 };
 
 type SeedNight = {
-  /** The date the night record itself carries: the row it appears in is the day AFTER. */
+  /** The date the night record itself carries, which is the row it appears in. */
   readonly daysAgo: number;
   readonly bedtime: number;
   readonly units: number;
 };
 
 const seedMeals: readonly SeedMeal[] = [
-  // Two days ago. Breakfast is the day's first meal, so its before reading 104 is also the
-  // morning reading of the night that led into this date.
+  // Two days ago. Its breakfast before reading 104 is also the morning reading of the night
+  // before it, which sits in the three-days-ago row.
   { daysAgo: 2, slot: 'breakfast', hour: 7, minute: 40, before: 104, after: 186, units: 5 },
   { daysAgo: 2, slot: 'lunch', hour: 12, minute: 55, before: 112, after: 133, units: 6 },
   // No dinner at all: that cell has nothing behind it in every view.
@@ -206,9 +209,12 @@ const seedMeals: readonly SeedMeal[] = [
 ];
 
 const seedNights: readonly SeedNight[] = [
-  // Dated three days ago, so it appears in the row TWO days ago: the night that led into
-  // that date. Bedtime 190, morning 104: a fall of 86.
+  // Dated three days ago, so it appears in the three-days-ago row, right of that dinner.
+  // Bedtime 190, and the next morning's breakfast opens on 104: a fall of 86.
   { daysAgo: 3, bedtime: 190, units: 18 },
+  // Dated four days ago. The next day has no breakfast, only a lunch at 120, so this night
+  // has no morning reading yet: 175 in Before, awaiting in Change and Both.
+  { daysAgo: 4, bedtime: 175, units: 16 },
 ];
 
 // --- What each cell must read ----------------------------------------------
@@ -228,7 +234,7 @@ const AWAITING = 'awaiting' as const;
 type CellState = CellReading | null | typeof AWAITING;
 
 type CellExpectation = {
-  /** Which column, left to right: 0 is the night, then breakfast, lunch, dinner. */
+  /** Which column, left to right: breakfast, lunch, dinner, then 3 is the night. */
   readonly column: 0 | 1 | 2 | 3;
   /** The accessible name of a populated cell must contain this. */
   readonly names: RegExp;
@@ -249,75 +255,82 @@ const rows: readonly RowExpectation[] = [
     daysAgo: 2,
     cells: [
       {
-        // The night dated the DAY BEFORE this row: bedtime 190, and the morning reading
-        // value 4 already derives -- the earliest before reading on this row's own date,
-        // which is breakfast's 104. 104 − 190 is −86.
         column: 0,
-        names: NIGHT_NAME,
-        before: { reads: ['190'], band: 'high' },
-        change: { reads: ['-86'], band: 'dropped' },
-        both: { reads: ['190', '104'], band: 'dropped' },
-      },
-      {
-        column: 1,
         names: /breakfast/i,
         before: { reads: ['104'], band: 'in-range' },
         change: { reads: ['+82'], band: 'rose-high' },
         both: { reads: ['104', '186'], band: 'rose-high' },
       },
       {
-        column: 2,
+        column: 1,
         names: /lunch/i,
         before: { reads: ['112'], band: 'in-range' },
         change: { reads: ['+21'], band: 'stable' },
         both: { reads: ['112', '133'], band: 'stable' },
       },
       // No dinner was eaten: an empty outline in every view, still offered to fill in.
-      { column: 3, names: /dinner/i, before: null, change: null, both: null },
+      { column: 2, names: /dinner/i, before: null, change: null, both: null },
+      // No night record dated two days ago, so this row's night cell is empty.
+      { column: 3, names: NIGHT_NAME, before: null, change: null, both: null },
     ],
   },
   {
     daysAgo: 3,
     cells: [
-      // No night record dated four days ago, so this row's night cell is empty.
-      { column: 0, names: NIGHT_NAME, before: null, change: null, both: null },
-      { column: 1, names: /breakfast/i, before: null, change: null, both: null },
+      { column: 0, names: /breakfast/i, before: null, change: null, both: null },
       {
-        column: 2,
+        column: 1,
         names: /lunch/i,
         before: { reads: ['120'], band: 'in-range' },
         change: { reads: ['+45'], band: 'rose' },
         both: { reads: ['120', '165'], band: 'rose' },
       },
       {
-        column: 3,
+        column: 2,
         names: /dinner/i,
         // 181 and above is 'high': the top band now has no ceiling above it, so a 260 and
-        // the 190 two rows up fall in the same band rather than in two.
+        // the 190 beside it fall in the same band rather than in two.
         before: { reads: ['260'], band: 'high' },
         // −60 is dropped. A rule read off the magnitude would say rose here and fail.
         change: { reads: ['-60'], band: 'dropped' },
         both: { reads: ['260', '200'], band: 'dropped' },
+      },
+      {
+        // This row's own night, right of its dinner: bedtime 190, and the morning reading
+        // value 4 derives -- the NEXT day's breakfast before reading, 104. 104 − 190 is −86.
+        column: 3,
+        names: NIGHT_NAME,
+        before: { reads: ['190'], band: 'high' },
+        change: { reads: ['-86'], band: 'dropped' },
+        both: { reads: ['190', '104'], band: 'dropped' },
       },
     ],
   },
   {
     daysAgo: 4,
     cells: [
-      { column: 0, names: NIGHT_NAME, before: null, change: null, both: null },
       {
         // Recorded, but nobody has taken the after reading yet: the before reading in
         // Before, and in Change and Both a cell marked as awaiting its reading -- never
         // the look of a slot with nothing recorded in it.
-        column: 1,
+        column: 0,
         names: /breakfast/i,
         before: { reads: ['64'], band: 'low' },
         change: AWAITING,
         both: AWAITING,
       },
       // Recorded with no reading at all: awaiting in every view.
-      { column: 2, names: /lunch/i, before: AWAITING, change: AWAITING, both: AWAITING },
-      { column: 3, names: /dinner/i, before: null, change: null, both: null },
+      { column: 1, names: /lunch/i, before: AWAITING, change: AWAITING, both: AWAITING },
+      { column: 2, names: /dinner/i, before: null, change: null, both: null },
+      {
+        // Bedtime 175, and the next day has no breakfast reading -- only a lunch's 120, which
+        // is not a morning reading. So the night is awaiting its morning in Change and Both.
+        column: 3,
+        names: NIGHT_NAME,
+        before: { reads: ['175'], band: 'elevated' },
+        change: AWAITING,
+        both: AWAITING,
+      },
     ],
   },
 ];
@@ -964,7 +977,7 @@ const assertRecordedOrNot = async (
       const style = getComputedStyle(node);
       return [style.borderTopStyle, style.borderTopColor, style.backgroundColor].join(' | ');
     });
-  const reference = await look(await cellAt(await rowFor(page, 2), 3));
+  const reference = await look(await cellAt(await rowFor(page, 2), 2));
   const mine = await look(located);
   if (awaiting) {
     expect(spoken, `${where} says it is recorded and awaiting a reading`).toMatch(/no reading/i);
@@ -1043,12 +1056,41 @@ test('the grid opens on Before: one row per day, four chronological columns, col
     ).toMatch(dayLabel(daysAgo));
   }
 
-  // The columns, left to right: the night half that is being shown, then the day's meals.
+  // The columns, left to right: the day's meals, then the night half that is being shown.
   const gridText = await textOf(grid(phone));
   expect(gridText, "Before names the night column 'Bedtime'").toMatch(/bedtime/i);
   expect(gridText, 'the meal columns are named').toMatch(/breakfast/i);
   expect(gridText).toMatch(/lunch/i);
   expect(gridText).toMatch(/dinner/i);
+  const headers = (await grid(phone).getByRole('columnheader').allTextContents())
+    .map((text) => text.trim())
+    .filter((text) => text !== '');
+  expect(headers, 'the night sits to the right of dinner, as the last column').toEqual([
+    'Breakfast',
+    'Lunch',
+    'Dinner',
+    'Bedtime',
+  ]);
+  // In every view, every header fits its column at 360 px -- 'Overnight' is as long as
+  // 'Breakfast' -- and the night's is drawn exactly as the meals' are, not smaller.
+  for (const view of ['change', 'both', 'before'] as const) {
+    await phone.getByRole('button', { name: new RegExp(`^${view}$`, 'i') }).click();
+    const drawn: string[] = [];
+    for (const header of await grid(phone).getByRole('columnheader').all()) {
+      const text = (await header.textContent())?.trim() ?? '';
+      if (text === '') continue;
+      const look = await header.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return {
+          clipped: node.scrollWidth > node.clientWidth,
+          style: [style.fontSize, style.fontVariantCaps, style.textTransform].join(' '),
+        };
+      });
+      expect(look.clipped, `in ${view}, the ${text} header is not cut off`).toBe(false);
+      drawn.push(look.style);
+    }
+    expect(new Set(drawn).size, `in ${view}, every header is drawn at one size and case`).toBe(1);
+  }
 
   // The default view, and the caption that says what the colour means.
   await expect(
@@ -1092,11 +1134,14 @@ test('Change shows the signed change and Both shows the two readings, each colou
   for (const view of ['change', 'both'] as const) {
     await chooseView(phone, view);
 
-    // The header of the night column says which half is being shown.
-    const gridText = await textOf(grid(phone));
-    expect(gridText, `the ${view} view names its night column`).toMatch(
-      // \bNight\b so 'Overnight' cannot satisfy the Both view's header.
-      view === 'change' ? /overnight/i : /\bNight\b/,
+    // The header of the night column says which half is being shown. Read as the words the
+    // page holds rather than as drawn, since every header is drawn in upper case; and matched
+    // whole, so 'Overnight' cannot satisfy the Both view's 'Night'.
+    const headerWords = (await grid(phone).getByRole('columnheader').allTextContents()).map(
+      (text) => text.trim(),
+    );
+    expect(headerWords, `the ${view} view names its night column`).toContain(
+      view === 'change' ? 'Overnight' : 'Night',
     );
 
     await expect(phone.getByText(CHANGE_CAPTION)).toBeVisible();
@@ -1134,7 +1179,7 @@ test('tapping a cell opens the entry behind it, where it can be finished or corr
   // A slot cell opens that meal's DETAIL first, exactly as a Today card does: looking is
   // the common case, and a tap that went straight into an editor would put a meal one
   // stray keystroke from being changed. The two-days-ago breakfast reads 104 to 186.
-  const breakfast = await cellAt(await rowFor(phone, 2), 1);
+  const breakfast = await cellAt(await rowFor(phone, 2), 0);
   await (await controlIn(breakfast)).click();
 
   const detail = phone.getByRole('region', { name: /meal detail/i });
@@ -1163,9 +1208,9 @@ test('tapping a cell opens the entry behind it, where it can be finished or corr
   await expect(after, "the form holds that meal's own after reading").toHaveValue('186');
 
   // A night cell opens the night screen for that night: the night dated three days ago,
-  // which is the one shown in the two-days-ago row, with its bedtime reading of 190.
+  // which is the one shown in the three-days-ago row, with its bedtime reading of 190.
   await navigate(phone, /^history$/i);
-  const night = await cellAt(await rowFor(phone, 2), 0);
+  const night = await cellAt(await rowFor(phone, 3), 3);
   await (await controlIn(night)).click();
 
   const bedtime = phone.getByLabel('Bedtime glucose', { exact: true });
@@ -1212,7 +1257,7 @@ test('an empty cell is where a day kept on paper gets filled in', async ({ brows
   const day = startOfLocalDay(BACKFILL_DAYS_AGO);
   // Nothing whatever is seeded on this day, which is the point: the days worth backfilling
   // are by definition the days with nothing in them.
-  const emptyDinner = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 3);
+  const emptyDinner = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 2);
   await (await controlIn(emptyDinner)).click();
 
   await expect(
@@ -1262,7 +1307,7 @@ test('an empty cell is where a day kept on paper gets filled in', async ({ brows
   // eight days ago now holds the reading, in its dinner column, banded by its level.
   await navigate(phone, /^history$/i);
   await expect(grid(phone)).toBeVisible();
-  const filled = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 3);
+  const filled = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 2);
   expect(
     await textOf(filled),
     'the backfilled reading landed on the date the cell named',
@@ -1276,14 +1321,14 @@ test('an empty cell is where a day kept on paper gets filled in', async ({ brows
   ).toHaveAttribute('data-level-band', 'elevated');
 
   // It landed there and nowhere else: today's dinner cell is still empty.
-  const todayDinner = await cellAt(await rowFor(phone, 0), 3);
+  const todayDinner = await cellAt(await rowFor(phone, 0), 2);
   expect(
     await textOf(todayDinner),
     "a backfilled meal is not also recorded against today",
   ).not.toMatch(/\d/);
 
   // An empty night cell opens the night screen for ITS OWN night, ready to be filled in.
-  const emptyNight = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 0);
+  const emptyNight = await cellAt(await rowFor(phone, BACKFILL_DAYS_AGO), 3);
   await (await controlIn(emptyNight)).click();
   const bedtime = phone.getByLabel('Bedtime glucose', { exact: true });
   await expect(bedtime, 'an empty night cell opens the night screen').toBeVisible();
@@ -1303,7 +1348,7 @@ test('leaving a form opened from a cell returns to the grid, not to Today', asyn
   // in. Sending either to Today would throw away where the person was, which is worst
   // exactly where it matters most: part-way down ninety rows of somebody else's
   // handwriting being copied in.
-  const breakfast = await cellAt(await rowFor(phone, 2), 1);
+  const breakfast = await cellAt(await rowFor(phone, 2), 0);
   await (await controlIn(breakfast)).click();
   const detail = phone.getByRole('region', { name: /meal detail/i });
   await expect(detail).toBeVisible();
@@ -1326,14 +1371,14 @@ test('leaving a form opened from a cell returns to the grid, not to Today', asyn
 
   // An empty slot cell leads to New meal, and the same holds: nothing was recorded, and the
   // grid being backfilled is still what the person is in the middle of.
-  const emptyDinner = await cellAt(await rowFor(phone, 6), 3);
+  const emptyDinner = await cellAt(await rowFor(phone, 6), 2);
   await (await controlIn(emptyDinner)).click();
   await expect(phone.getByText(/new meal/i)).toBeVisible();
   await phone.getByRole('button', { name: /^cancel$/i }).click();
   await expect(grid(phone), 'cancelling a backfill returns to History').toBeVisible();
 
   // And the night screen, which is a different editor reached from a different column.
-  const night = await cellAt(await rowFor(phone, 2), 0);
+  const night = await cellAt(await rowFor(phone, 3), 3);
   await (await controlIn(night)).click();
   await expect(phone.getByLabel('Bedtime glucose', { exact: true })).toBeVisible();
   await phone.getByRole('button', { name: /^cancel$/i }).click();
@@ -1362,7 +1407,7 @@ test('returning to the grid returns to the same scroll position', async ({ brows
   // Leave through a cell and come straight back. Coming back to the top of ninety rows after
   // cancelling is barely better than being dumped on Today: the point of going back is to
   // carry on where you were.
-  await (await controlIn(await cellAt(await rowFor(phone, deep), 2))).click();
+  await (await controlIn(await cellAt(await rowFor(phone, deep), 1))).click();
   await expect(phone.getByText(/new meal/i)).toBeVisible();
   await phone.getByRole('button', { name: /^cancel$/i }).click();
   await expect(grid(phone)).toBeVisible();
@@ -1414,7 +1459,7 @@ test('the bottom navigation holds its place and the grid reserves room for it', 
   ).toBeLessThanOrEqual(scrolledTo.y + 1);
 
   // Its cells are reachable, not merely drawn: a row behind the bar can be seen and not used.
-  const lastCell = await cellAt(lastRow, 3);
+  const lastCell = await cellAt(lastRow, 2);
   const opener = await controlIn(lastCell);
   await opener.click();
   await expect(
@@ -1714,7 +1759,7 @@ test("the device's Back returns to the grid, at the position it was left at, wit
   const before = await rectOf(await labelOf(await rowFor(phone, deep)), `the row ${deep} days ago`);
 
   // The same journey the Cancel case makes, left by the gesture instead of the control.
-  await (await controlIn(await cellAt(await rowFor(phone, deep), 2))).click();
+  await (await controlIn(await cellAt(await rowFor(phone, deep), 1))).click();
   await expect(phone.getByText(/new meal/i)).toBeVisible();
   const entriesOnForm = await historyLength(phone);
   expect(
@@ -1748,7 +1793,7 @@ test("the device's Back returns to the grid, at the position it was left at, wit
 
   // The night screen is a different editor reached from a different column, and the gesture
   // is the same one way back.
-  await (await controlIn(await cellAt(await rowFor(phone, 2), 0))).click();
+  await (await controlIn(await cellAt(await rowFor(phone, 3), 3))).click();
   await expect(phone.getByLabel('Bedtime glucose', { exact: true })).toBeVisible();
   await phone.goBack();
   await expect(grid(phone), 'Back from the night screen returns to History').toBeVisible();
@@ -1767,7 +1812,7 @@ test("a meal's own URL reloads to that meal, because the screen's identity is in
   // The two-days-ago breakfast, 104 to 186. Opening it must change the route: that is what
   // makes a reload and a Back possible at all. The cell opens the detail, and its Edit
   // control the form, and each is its own route.
-  await (await controlIn(await cellAt(await rowFor(phone, 2), 1))).click();
+  await (await controlIn(await cellAt(await rowFor(phone, 2), 0))).click();
   const detail = phone.getByRole('region', { name: /meal detail/i });
   await expect(detail).toContainText('186');
   await expectRoute(phone, /^#detail\/.+/, "that meal's detail route");
@@ -1849,7 +1894,7 @@ test('after signing out, Back cannot walk back into the account that just left',
   const phone = await openHistory(browser, accounts.owner);
 
   // Deep enough in that there are entries behind this one for Back to find.
-  await (await controlIn(await cellAt(await rowFor(phone, 2), 1))).click();
+  await (await controlIn(await cellAt(await rowFor(phone, 2), 0))).click();
   await expect(phone.getByRole('region', { name: /meal detail/i })).toContainText('104');
   await phone.goBack();
   await expect(grid(phone)).toBeVisible();

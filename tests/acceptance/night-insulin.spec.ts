@@ -15,11 +15,11 @@ import { createAccounts, removeAccounts, type Account, type SeededAccounts } fro
  *
  * Two claims carry this value and the oracle is built around them:
  *
- *  - The next-morning reading is DERIVED, never recorded: it is the glucose before the
- *    EARLIEST meal on the following calendar date. So yesterday's date is seeded with
- *    two meals -- an early one reading 106 and a later one reading 200 -- and the row
- *    for the night before yesterday must read 106. A rule that took the latest meal, or
- *    any meal, would show 200 and fail here.
+ *  - The next-morning reading is DERIVED, never recorded: it is the glucose before
+ *    BREAKFAST on the following calendar date. So yesterday's date is seeded with two
+ *    meals -- a breakfast reading 106 and a lunch reading 200 -- and the row for the
+ *    night before yesterday must read 106. A rule that took the lunch, or any meal,
+ *    would show 200 and fail here.
  *  - The morning reading is banded by LEVEL, not by change, and a night whose following
  *    date has no reading is INDETERMINATE: an em dash and no band at all, because a
  *    measurement that was never taken must not be drawn as a value.
@@ -65,7 +65,7 @@ const localTime = (day: Date, hour: number, minute: number): string =>
 
 /**
  * The five nights the screen must list, newest first: strictly before today, which is
- * the date being recorded. Each morning is the glucose before the earliest meal on the
+ * the date being recorded. Each morning is the glucose before breakfast on the
  * FOLLOWING date, so a night's expected morning is deliberately written beside the
  * night rather than beside the meal that supplies it.
  */
@@ -84,7 +84,7 @@ const nights = [
 
 /**
  * The meals that supply the mornings. Yesterday carries two, so the derivation is
- * judged on the earliest and not merely on 'some meal that day'.
+ * judged on the breakfast and not merely on 'some meal that day'.
  */
 const meals = [
   { daysAgo: 1, slot: 'breakfast', hour: 7, minute: 5, before: 106 },
@@ -300,10 +300,10 @@ test('the night dose is recorded and the last five nights read as dose and next-
     }
   }
 
-  // The later meal on yesterday reads 200. The morning belongs to the EARLIEST meal, so
-  // 200 must appear nowhere in the list.
+  // Yesterday's lunch reads 200. The morning belongs to the BREAKFAST, so 200 must appear
+  // nowhere in the list.
   const listedText = (await rows.allInnerTexts()).join(' | ').replace(/\s+/g, ' ');
-  expect(listedText, 'the morning is the earliest meal of the day, not the latest').not.toContain(
+  expect(listedText, 'the morning is the breakfast, not a later meal').not.toContain(
     '200',
   );
 
