@@ -518,6 +518,27 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
         },
       },
     ),
+    // The after reading sits directly below the before: the two are read as a
+    // pair, and the after is what an edit most often comes back to add. Exercise
+    // and the note matter less, so they sit last.
+    numberField(
+      'meal-glucose-after',
+      'Glucose after',
+      'glucose',
+      draft.glucoseAfter,
+      handlers.onGlucoseAfter,
+      {
+        pad: {
+          chips: chips.after,
+          isOpen: padTarget === 'glucose-after',
+          onOpen: () => openPad('glucose-after'),
+          onClose: () => closePad(),
+        },
+      },
+    ),
+    // The panel sits beside the after reading, because that is the number it is
+    // about -- and it only ever reports beside it, never into it.
+    ...(hasFoods ? [panel] : []),
     foodList(state, handlers),
     numberField(
       'meal-insulin-units',
@@ -538,26 +559,6 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       handlers.onExerciseContext,
     ),
     noteField('meal-note', draft.note, handlers.onNote),
-    // The panel sits beside the after reading, because that is the number it is
-    // about -- and it only ever reports beside it, never into it.
-    ...(hasFoods ? [panel] : []),
-    // The after reading is optional and often arrives later: a person has only
-    // just eaten when they record the meal. It sits last for that reason.
-    numberField(
-      'meal-glucose-after',
-      'Glucose after',
-      'glucose',
-      draft.glucoseAfter,
-      handlers.onGlucoseAfter,
-      {
-        pad: {
-          chips: chips.after,
-          isOpen: padTarget === 'glucose-after',
-          onOpen: () => openPad('glucose-after'),
-          onClose: () => closePad(),
-        },
-      },
-    ),
   );
 
   return screen;
