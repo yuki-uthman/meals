@@ -271,6 +271,27 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
   expect(form.toLowerCase(), 'the reopened foods keep their types').toContain('mixed dish');
   expect(form.toLowerCase(), 'the reopened foods keep their types').toContain('vegetable');
 
+  // The after reading is what this edit came back for, so it sits directly below the
+  // before: no other field comes between the two, and Exercise and the Note come after it.
+  const fieldTop = async (label: string): Promise<number> => {
+    const box = await phone.getByLabel(label, { exact: true }).boundingBox();
+    if (box === null) throw new Error(`${label} has no box`);
+    return box.y;
+  };
+  const beforeTop = await fieldTop('Glucose before');
+  const afterTop = await fieldTop('Glucose after');
+  expect(afterTop, 'Glucose after is below Glucose before').toBeGreaterThan(beforeTop);
+  for (const label of ['Rapid-acting units', 'Note', 'Time']) {
+    const top = await fieldTop(label);
+    expect(
+      top < beforeTop || top > afterTop,
+      `${label} does not sit between the before and after readings`,
+    ).toBe(true);
+  }
+  const exerciseTop = (await phone.getByRole('group', { name: /^exercise$/i }).boundingBox())?.y;
+  expect(exerciseTop, 'Exercise comes after the after reading').toBeGreaterThan(afterTop);
+  expect(await fieldTop('Note'), 'the Note comes after the after reading').toBeGreaterThan(afterTop);
+
   await phone.getByLabel('Glucose after', { exact: true }).fill('182');
   await save(phone);
 
