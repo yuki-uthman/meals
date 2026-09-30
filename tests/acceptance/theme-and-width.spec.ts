@@ -358,15 +358,13 @@ const SCREENS: readonly Screen[] = [
     },
   },
   {
-    name: 'the meal form with the number pad open',
+    name: 'the meal form with a glucose field focused',
     reach: async (page) => {
       await openMealForm(page);
-      // Focusing a glucose field is what opens the pad, as value 5 settled.
+      // The two readings share one row, so this is the screen most likely to be pushed
+      // sideways at 360 px.
       await page.getByLabel('Glucose before', { exact: true }).click();
-      await expect(
-        page.getByRole('group', { name: /number pad/i }),
-        'the number pad is open',
-      ).toBeVisible();
+      await expect(page.getByLabel('Glucose before', { exact: true })).toBeFocused();
     },
   },
   {

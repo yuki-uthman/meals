@@ -4,40 +4,20 @@ import { startLocalStack, type LocalStack } from '../support/local-stack';
 import { createAccounts, removeAccounts, type Account, type SeededAccounts } from '../support/accounts';
 
 /**
- * Public oracle for value 5: the in-app number pad and the dose stepper.
+ * Public oracle for value 5, as revised: glucose is typed on the device's own number
+ * keyboard, and a dose steps by one unit.
  *
- * Observation: tapping a glucose field opens an in-app number pad with chips for the last
- * reading; dose fields change by one unit with minus and plus buttons.
+ * Observation: tapping a glucose field opens the phone's number keyboard and nothing is
+ * drawn into the page for it -- no in-app pad and no 'last reading' suggestion; dose fields
+ * change by one unit with minus and plus buttons.
  *
  * Like every earlier value the oracle drives the built static bundle in a real browser
- * against the Supabase CLI local stack, so the chips carry readings Postgres actually
- * holds and handed back through real row-level security, not numbers a fixture invented
- * inside the page.
+ * against the Supabase CLI local stack. Readings are seeded so that a suggestion, if one
+ * were still offered, would have a number to show: its absence is then a real absence.
  *
- * Four claims carry this value and the oracle is built around them:
- *
- *  - The pad writes into the SAME labelled input value 3 declared. So the field is located
- *    by its label, is asserted editable rather than readonly, and its value is read back
- *    after every key. A pad that replaced the field with its own display would fail here,
- *    and would also have broken record-a-meal.
- *  - The keying rules are exact: a digit appends to the right, a fourth digit is refused,
- *    Delete removes exactly the rightmost digit, Clear empties, and a chip REPLACES the
- *    value without closing the pad. Each is read off the field after one single action, so
- *    no two rules can cover for each other.
- *  - The two chips come from what the account recorded: 'Last reading 133 · 12:55' is the
- *    most recent glucose value -- today's lunch AFTER reading, which counts as later than
- *    that same meal's before reading of 112 -- and 'Before last dinner 110' is the before
- *    reading of the most recent meal in the slot being recorded. A rule that took the
- *    before reading, or the wrong slot, would show 112 and fail here.
- *  - A value typed straight into a glucose field SURVIVES being focused, and the pad opens
- *    seeded from it. This is judged by filling the field without the pad, focusing it, and
- *    then asking the pad to Delete: the value must lose exactly its rightmost digit. An
- *    implementation that re-rendered or reset the input on focus would eat a
- *    hardware-keyboard user's first keystroke, and would break value 3's oracle too.
- *
- * Widgets are located tolerantly by their accessible names, because whether a key is a
- * button in a fieldset or a cell in a grid is a presentation choice, while the pad's name,
- * its controls and the numbers it puts in the field are what the design fixes.
+ * The keyboard itself is the device's, so what is asserted is what asks for it: the field's
+ * inputmode is 'numeric', which is the attribute a phone reads to open its number keyboard,
+ * and never 'none', which is what an in-app pad would set to keep that keyboard away.
  */
 
 const PHONE_VIEWPORT = { width: 360, height: 780 } as const;
@@ -49,9 +29,8 @@ const NOT_LOGGED_YET = 'Not logged yet';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The chip texts the design fixes, with the readings the seeds put behind them. */
-const LAST_READING_CHIP = 'Last reading 133 · 12:55';
-const BEFORE_LAST_DINNER_CHIP = 'Before last dinner 110';
+/** What an in-app suggestion used to say, with the readings the seeds would put on it. */
+const SUGGESTIONS = [/last reading/i, /before last/i] as const;
 
 let stack: LocalStack;
 let accounts: SeededAccounts;
@@ -76,10 +55,8 @@ const localTime = (day: Date, hour: number, minute: number): string =>
   new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute, 0, 0).toISOString();
 
 /**
- * Today's lunch supplies the last reading: before 112 and after 133 at 12:55, so the most
- * recent glucose value is 133 and the time shown is the meal's own time. Yesterday's
- * dinner supplies the slot chip with its before reading of 110. Today's dinner is
- * deliberately absent: it is the slot the person records into.
+ * Today's lunch and yesterday's dinner are recorded readings a suggestion could repeat.
+ * Today's dinner is deliberately absent: it is the slot the person records into.
  */
 const seededMeals = [
   { daysAgo: 0, slot: 'lunch', hour: 12, minute: 55, before: 112, after: 133 },
@@ -200,105 +177,45 @@ const glucoseAfterField = (page: Page): Locator =>
 const doseField = (page: Page): Locator =>
   page.getByLabel('Rapid-acting units', { exact: true });
 
-const pad = (page: Page): Locator => page.getByRole('group', { name: /^number pad$/i });
-
-/** A pad control -- a digit, Clear, Delete, Done or a chip -- by its accessible name. */
-const key = (page: Page, name: string | RegExp): Locator => {
-  const exact = typeof name === 'string' ? new RegExp(`^${name}$`) : name;
-  return pad(page).getByRole('button', { name: exact });
-};
-
-const press = async (page: Page, name: string | RegExp): Promise<void> => {
-  const control = key(page, name);
-  await expect(control, `the pad offers exactly one '${String(name)}' control`).toHaveCount(1);
-  await control.click();
-};
-
-test('a glucose field opens the pad with its chips, keys exactly, and a dose steps by one unit', async ({
+test('a glucose field opens the device keyboard with nothing drawn in the page, and a dose steps by one unit', async ({
   browser,
 }) => {
   const phone = await openPhone(browser);
   await signIn(phone, accounts.owner);
-
-  // Dinner today is unrecorded: it is the slot being recorded, which is what makes
-  // yesterday's dinner 'the most recent meal in the slot'.
   await logFromEmptyCard(phone, 'Dinner');
 
-  const glucose = glucoseBeforeField(phone);
-  await expect(glucose, "'glucose before' still names one input").toHaveCount(1);
+  const before = glucoseBeforeField(phone);
+  const after = glucoseAfterField(phone);
 
-  // The pad is not on screen until the field is tapped: it opens on the field, it is not
-  // simply always there.
-  await expect(pad(phone), 'the pad is closed before the field is tapped').toHaveCount(0);
+  for (const [name, field] of [
+    ['Glucose before', before],
+    ['Glucose after', after],
+  ] as const) {
+    await expect(field, `'${name}' names one input`).toHaveCount(1);
+    // numeric, never none: 'none' is what keeps the phone's keyboard away for an in-app pad.
+    await expect(field, `'${name}' asks the phone for its number keyboard`).toHaveAttribute(
+      'inputmode',
+      'numeric',
+    );
 
-  // --- Tapping the field opens the pad, carrying both chips -----------------
+    await field.click();
+    await expect(field, `'${name}' takes focus`).toBeFocused();
+    await expect(
+      phone.getByRole('group', { name: /number pad/i }),
+      `tapping '${name}' draws no in-app pad`,
+    ).toHaveCount(0);
+    const body = await textOf(phone.locator('body'));
+    for (const suggestion of SUGGESTIONS) {
+      expect(body, `tapping '${name}' offers no ${String(suggestion)} suggestion`).not.toMatch(
+        suggestion,
+      );
+    }
 
-  await glucose.click();
-
-  await expect(pad(phone), 'tapping the field reveals the number pad').toHaveCount(1);
-  await expect(pad(phone)).toBeVisible();
-
-  // The field keeps its label and stays an editable input: the pad writes into the very
-  // field value 3 declared, and a readonly field would break that value's oracle while
-  // looking like an improvement.
-  await expect(glucose, 'the field the pad writes into is never readonly').toBeEditable();
-
-  const padText = await textOf(pad(phone));
-  expect(padText, 'the last reading chip carries the most recent value and its time').toContain(
-    LAST_READING_CHIP,
-  );
-  expect(padText, 'the slot chip carries the before reading of the most recent dinner').toContain(
-    BEFORE_LAST_DINNER_CHIP,
-  );
-  // The most recent reading is the lunch's AFTER value, because both readings hang off the
-  // meal's own time and the after one counts as later. 112 is that meal's before reading
-  // and must not be what the chip offers.
-  expect(padText, 'the last reading is the after value, not the before value').not.toContain('112');
-
-  // Every digit the pad claims to have.
-  for (const digit of ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']) {
-    await expect(key(phone, digit), `the pad carries the digit ${digit}`).toHaveCount(1);
+    // Typed straight in, as the device keyboard types it.
+    await field.fill('');
+    await phone.keyboard.type('142');
+    await expect(field, `'${name}' takes what is typed on the keyboard`).toHaveValue('142');
   }
-
-  expect(await scrollsHorizontally(phone)).toBe(false);
-
-  // --- Keying: a digit appends to the right --------------------------------
-
-  await press(phone, '1');
-  await expect(glucose, 'the first digit lands in the field').toHaveValue('1');
-  await press(phone, '5');
-  await expect(glucose, 'a digit appends to the right').toHaveValue('15');
-  await press(phone, '0');
-  await expect(glucose, 'three digits key 150').toHaveValue('150');
-
-  // A fourth digit is refused: a reading above 999 is not a reading.
-  await press(phone, '7');
-  await expect(glucose, 'the fourth digit changes nothing').toHaveValue('150');
-
-  // Delete removes exactly the rightmost digit -- one, not all of them.
-  await press(phone, 'Delete');
-  await expect(glucose, 'Delete removes the rightmost digit').toHaveValue('15');
-
-  // Clear empties the field.
-  await press(phone, 'Clear');
-  await expect(glucose, 'Clear empties the field').toHaveValue('');
-
-  // Delete on an empty field is refused, and changes nothing else.
-  await press(phone, 'Delete');
-  await expect(glucose, 'Delete on an empty field leaves it empty').toHaveValue('');
-  await expect(pad(phone), 'a refused Delete does not close the pad').toBeVisible();
-
-  // --- A chip fills the field and leaves the pad open ----------------------
-
-  await press(phone, BEFORE_LAST_DINNER_CHIP);
-  await expect(glucose, 'the chip puts its own number in the field').toHaveValue('110');
-  await expect(pad(phone), 'a chip does not close the pad, so a mistap is one Clear away').toBeVisible();
-
-  // --- Done closes the pad and leaves the value ----------------------------
-
-  await press(phone, 'Done');
-  await expect(pad(phone), 'Done closes the pad').toHaveCount(0);
-  await expect(glucose, 'Done leaves the value in the field').toHaveValue('110');
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 
@@ -330,30 +247,6 @@ test('a glucose field opens the pad with its chips, keys exactly, and a dose ste
   await dose.fill('0');
   await decrease.click();
   await expect(dose, 'decrease at zero leaves the dose at zero').toHaveValue('0');
-
-  // --- A value put into a glucose field directly survives being focused ----
-
-  // Filled without the pad at all, exactly the way value 3's oracle fills it, so the field
-  // is still an ordinary input a hardware keyboard and an automated fill can both reach.
-  const after = glucoseAfterField(phone);
-  await expect(after, "'Glucose after' still names one editable input").toBeEditable();
-  await after.fill('182');
-  await expect(after, 'the field takes a value typed straight into it').toHaveValue('182');
-
-  await after.focus();
-
-  // Focusing is how a person with a hardware keyboard starts typing, and it is what opens
-  // the pad. The pad must assist the field rather than replace it: a re-render that
-  // discarded or reset the input would eat that first keystroke, and would break value 3's
-  // oracle in the same breath.
-  await expect(pad(phone), 'focusing a glucose field opens the pad').toBeVisible();
-  await expect(after, 'the value already in the field survives being focused').toHaveValue('182');
-
-  // And the pad genuinely SEEDED itself from that value rather than starting blank beside
-  // it: Delete takes the rightmost digit of 182. A pad holding its own empty entry would
-  // leave the field at 182 or would clear it, and either way fails here.
-  await press(phone, 'Delete');
-  await expect(after, 'the pad opened on the value the field already held').toHaveValue('18');
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });

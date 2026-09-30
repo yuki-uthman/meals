@@ -271,26 +271,32 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
   expect(form.toLowerCase(), 'the reopened foods keep their types').toContain('mixed dish');
   expect(form.toLowerCase(), 'the reopened foods keep their types').toContain('vegetable');
 
-  // The after reading is what this edit came back for, so it sits directly below the
-  // before: no other field comes between the two, and Exercise and the Note come after it.
-  const fieldTop = async (label: string): Promise<number> => {
+  // The after reading is what this edit came back for, so it sits beside the before, on the
+  // same row: before on the left, after on the right, each at least a third of the width.
+  // Exercise and the Note come below the pair.
+  const boxOf = async (label: string) => {
     const box = await phone.getByLabel(label, { exact: true }).boundingBox();
     if (box === null) throw new Error(`${label} has no box`);
-    return box.y;
+    return box;
   };
-  const beforeTop = await fieldTop('Glucose before');
-  const afterTop = await fieldTop('Glucose after');
-  expect(afterTop, 'Glucose after is below Glucose before').toBeGreaterThan(beforeTop);
-  for (const label of ['Rapid-acting units', 'Note', 'Time']) {
-    const top = await fieldTop(label);
-    expect(
-      top < beforeTop || top > afterTop,
-      `${label} does not sit between the before and after readings`,
-    ).toBe(true);
+  const beforeBox = await boxOf('Glucose before');
+  const afterBox = await boxOf('Glucose after');
+  expect(Math.abs(afterBox.y - beforeBox.y), 'the two readings share one row').toBeLessThanOrEqual(4);
+  expect(afterBox.x, 'Glucose after is to the right of Glucose before').toBeGreaterThanOrEqual(
+    beforeBox.x + beforeBox.width,
+  );
+  const viewport = phone.viewportSize();
+  if (viewport === null) throw new Error('no viewport');
+  for (const [name, box] of [
+    ['Glucose before', beforeBox],
+    ['Glucose after', afterBox],
+  ] as const) {
+    expect(box.width, `${name} is wide enough to type into`).toBeGreaterThan(viewport.width / 3);
   }
+  const rowBottom = Math.max(beforeBox.y + beforeBox.height, afterBox.y + afterBox.height);
   const exerciseTop = (await phone.getByRole('group', { name: /^exercise$/i }).boundingBox())?.y;
-  expect(exerciseTop, 'Exercise comes after the after reading').toBeGreaterThan(afterTop);
-  expect(await fieldTop('Note'), 'the Note comes after the after reading').toBeGreaterThan(afterTop);
+  expect(exerciseTop, 'Exercise comes below the readings').toBeGreaterThan(rowBottom);
+  expect((await boxOf('Note')).y, 'the Note comes below the readings').toBeGreaterThan(rowBottom);
 
   await phone.getByLabel('Glucose after', { exact: true }).fill('182');
   await save(phone);
