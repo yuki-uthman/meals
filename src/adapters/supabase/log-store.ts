@@ -278,15 +278,17 @@ const existingNightId = async (
   return { id: rows.length === 0 ? null : String(rows[0]?.id) };
 };
 
-const MORNING_SELECT = 'eaten_on, eaten_at, glucose_before';
+const MORNING_SELECT = 'slot, eaten_on, eaten_at, glucose_before';
 
 type MorningRow = {
+  slot?: unknown;
   eaten_on?: unknown;
   eaten_at?: unknown;
   glucose_before?: unknown;
 };
 
 const toMorningMeal = (row: MorningRow): MorningMeal => ({
+  slot: String(row.slot) as MealSlot,
   eatenOn: String(row.eaten_on),
   eatenAt: new Date(String(row.eaten_at)),
   glucoseBefore: asNumber(row.glucose_before),

@@ -1115,8 +1115,10 @@ label {
   top: 0;
   z-index: 2;
   background: var(--canvas);
-  padding: var(--space-1);
-  font-size: 0.6875rem;
+  /* No side padding, and small enough that 'BREAKFAST', the longest header,
+     fits its quarter of a 360 px grid rather than being cut off. */
+  padding: var(--space-1) 0;
+  font-size: 0.625rem;
   text-align: center;
   /* The rule beneath the header row: what separates the headers from the ninety
      rows that pass underneath them. */
@@ -1132,17 +1134,8 @@ label {
 .history__header {
   color: var(--ink);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-
-/* The night column, which says which half of the night-and-morning pair is being
-   shown. It is set in small capitals rather than transformed, so it reads as one
-   of the same headers while the word itself stays exactly what the view chose:
-   'Night' transformed would be indistinguishable from 'Overnight' transformed. */
-.history__header--night {
-  text-transform: none;
-  font-variant-caps: all-small-caps;
 }
 
 .history__corner {

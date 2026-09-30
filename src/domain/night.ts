@@ -5,12 +5,19 @@
 //
 // The next-morning reading is DERIVED, never recorded: the brief's list of what
 // the person records for a night is the dose, the time and the bedtime glucose,
-// and nothing else. It is the glucose before the earliest meal on the following
-// calendar date, and a night whose following date has no such reading is
-// indeterminate rather than zero.
+// and nothing else. It is the glucose before breakfast on the following calendar
+// date, and a night whose following date has no such reading is indeterminate
+// rather than zero.
 
 import { levelBand, type LevelBand } from './band';
-import { clockTime, doseText, shiftDate, type IsoDate, type NightInsulin } from './entry';
+import {
+  clockTime,
+  doseText,
+  shiftDate,
+  type IsoDate,
+  type MealSlot,
+  type NightInsulin,
+} from './entry';
 
 /**
  * The night being filled in. Like a meal draft it holds what the person typed, as
@@ -153,12 +160,13 @@ export const nightRecording = (draft: NightDraft): NightRecording | null => {
 // ------------------------------------------------------- the five-night list
 
 /**
- * A meal that could supply a morning reading: only the date it belongs to, when
- * it was eaten and the reading before it. Which meal of the day supplies the
- * morning is decided here and not by the store, so the rule is one pure
+ * A meal that could supply a morning reading: only its slot, the date it belongs
+ * to, when it was eaten and the reading before it. Which meal of the day supplies
+ * the morning is decided here and not by the store, so the rule is one pure
  * function rather than a shape of query.
  */
 export type MorningMeal = {
+  readonly slot: MealSlot;
   readonly eatenOn: IsoDate;
   readonly eatenAt: Date;
   readonly glucoseBefore: number | null;
@@ -210,16 +218,19 @@ const byTimeAscending = (a: MorningMeal, b: MorningMeal): number =>
   a.eatenAt.getTime() - b.eatenAt.getTime();
 
 /**
- * The glucose before the EARLIEST meal on the given date that carries one. A
- * later meal's reading is not a morning reading, however much later it is the
- * only one there.
+ * The glucose before BREAKFAST on the given date. A lunch's reading is not a
+ * morning reading, however much it is the only one that day: a morning nobody
+ * measured before breakfast stays unmeasured until that reading is filled in.
  */
 export const morningReading = (
   mornings: readonly MorningMeal[],
   date: IsoDate,
 ): number | null => {
   const onDate = mornings
-    .filter((meal) => meal.eatenOn === date && meal.glucoseBefore !== null)
+    .filter(
+      (meal) =>
+        meal.eatenOn === date && meal.slot === 'breakfast' && meal.glucoseBefore !== null,
+    )
     .sort(byTimeAscending);
   return onDate.length === 0 ? null : (onDate[0] as MorningMeal).glucoseBefore;
 };

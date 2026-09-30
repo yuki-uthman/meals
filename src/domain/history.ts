@@ -2,14 +2,15 @@
 // judged on -- which reading sits in which column, and which band it falls in --
 // is a pure function of what the store handed back.
 //
-// One row per calendar date, newest first, and four columns. The first is the
-// night that led INTO that day, so reading a row left to right is chronological:
-// overnight, then breakfast, lunch and dinner.
+// One row per calendar date, newest first, and four columns: breakfast, lunch,
+// dinner, and then that day's own night, so reading a row left to right is the
+// day as it happened, ending at bedtime.
 //
 // Two things are deliberately not invented here. The night's morning reading is
-// the one value 4 already derives -- the earliest before reading on the row's own
-// date -- rather than a second kind of reading nobody records; and a reading that
-// was never taken produces an empty cell rather than a change of zero.
+// the one value 4 derives -- the before reading of the NEXT day's breakfast --
+// rather than a second kind of reading nobody records, so it fills itself in once
+// that breakfast is recorded and is never typed into the night; and a reading
+// that was never taken produces an empty cell rather than a change of zero.
 
 import { changeBand, levelBand, type ChangeBand, type LevelBand } from './band';
 import {
@@ -63,7 +64,7 @@ export const historyCaption = (view: HistoryView): string =>
   view === 'before' ? LEVEL_CAPTION : CHANGE_CAPTION;
 
 /**
- * The first column's header follows the view: it is a night-and-morning pair,
+ * The night column's header follows the view: it is a bedtime-and-morning pair,
  * and the header says which half is being shown.
  */
 const NIGHT_HEADERS: Readonly<Record<HistoryView, string>> = {
@@ -78,8 +79,8 @@ export const nightColumnHeader = (view: HistoryView): string => NIGHT_HEADERS[vi
 export const HISTORY_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner'];
 
 export const historyHeaders = (view: HistoryView): readonly string[] => [
-  nightColumnHeader(view),
   ...HISTORY_SLOTS.map(slotLabel),
+  nightColumnHeader(view),
 ];
 
 // --------------------------------------------------- how far back a grid runs
@@ -114,14 +115,14 @@ const dayNumber = (date: IsoDate): number => {
 const earlier = (a: IsoDate | null, b: IsoDate): IsoDate => (a === null || b < a ? b : a);
 
 /**
- * The oldest date the record reaches, as a ROW: a meal's own date, and for a
- * night the date it led into, which is the day after the night record. Null when
- * the account has recorded nothing at all.
+ * The oldest date the record reaches, as a ROW: a meal's own date, and a night's
+ * own date, since a night sits in the row of the day it ends. Null when the
+ * account has recorded nothing at all.
  */
 export const earliestRecordedDate = (window: HistoryWindow): IsoDate | null => {
   let earliest: IsoDate | null = null;
   for (const meal of window.meals) earliest = earlier(earliest, meal.eatenOn);
-  for (const night of window.nights) earliest = earlier(earliest, shiftDate(night.nightOn, 1));
+  for (const night of window.nights) earliest = earlier(earliest, night.nightOn);
   return earliest;
 };
 
@@ -151,7 +152,7 @@ export type CellTarget =
    * to be loaded is what stops an edit moving the meal to another day.
    */
   | { readonly kind: 'meal'; readonly id: string; readonly eatenOn: IsoDate }
-  /** The night record's own date, which is the day BEFORE the row it appears in. */
+  /** The night record's own date, which is the date of the row it appears in. */
   | { readonly kind: 'night'; readonly nightOn: IsoDate }
   /**
    * A new entry for that date and that slot: what an empty slot cell opens, with
@@ -215,7 +216,7 @@ export type HistoryRow = {
    * with a 'Tue 22' in them they are looking at.
    */
   readonly monthLabel: string | null;
-  /** Exactly four: the night, then breakfast, lunch and dinner. */
+  /** Exactly four: breakfast, lunch and dinner, then that day's night. */
   readonly cells: readonly HistoryCell[];
 };
 
@@ -356,8 +357,8 @@ const nightCell = (
   column: string,
   view: HistoryView,
 ): HistoryCell => {
-  // The night that led INTO this date is the night record dated the day before it.
-  const nightOn = shiftDate(date, -1);
+  // This row's own night: the night record dated this row's date.
+  const nightOn = date;
   const night = window.nights.find((candidate) => candidate.nightOn === nightOn);
   const target: CellTarget = { kind: 'night', nightOn };
   // Empty or not, a night cell opens the night screen for ITS OWN night, which is
@@ -381,9 +382,10 @@ const nightCell = (
     };
   }
 
-  // The morning reading is the one value 4 derives: the earliest before reading
-  // on the row's OWN date. Nobody measured means no change, not a change of zero.
-  const morning = morningReading(window.meals, date);
+  // The morning reading is the one value 4 derives: the before reading of the
+  // NEXT day's breakfast. Until that is recorded the night is awaiting it, never a
+  // change of zero.
+  const morning = morningReading(window.meals, shiftDate(date, 1));
   if (bedtime === null || morning === null) return nothingToShow();
   const change = morning - bedtime;
   const readings = view === 'change' ? [changeText(change)] : [reading(bedtime), reading(morning)];
@@ -397,7 +399,7 @@ const nightCell = (
   };
 };
 
-/** One row per date, newest first, each with its four chronological columns. */
+/** One row per date, newest first: breakfast, lunch, dinner, then that night. */
 export const historyRows = (
   window: HistoryWindow,
   dates: readonly IsoDate[],
@@ -419,10 +421,10 @@ export const historyRows = (
       spokenLabel: spokenHistoryDate(date),
       monthLabel,
       cells: [
-        nightCell(window, date, label, nightColumn, view),
         ...HISTORY_SLOTS.map((slot) =>
           mealCell(mealIn(window.meals, date, slot), date, slot, label, slotLabel(slot), view),
         ),
+        nightCell(window, date, label, nightColumn, view),
       ],
     };
   });

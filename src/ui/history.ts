@@ -13,8 +13,8 @@ import {
 } from '../domain/history';
 
 // The History grid: one row per calendar date, newest first, and four columns
-// read left to right as the day happened -- the night that led into it, then
-// breakfast, lunch and dinner.
+// read left to right as the day happened -- breakfast, lunch and dinner, then
+// that day's night.
 //
 // Every band is published to the DOM BY NAME, as data-level-band in the Before
 // view and data-change-band in the other two, and the stylesheet is the only
@@ -177,19 +177,11 @@ const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: His
   const corner = element('th', 'history__corner');
   corner.setAttribute('scope', 'col');
   headRow.append(corner);
-  // The meal columns are drawn in upper case; the night column is not, and is set
-  // in small capitals instead, so it READS as one of the same headers while its
-  // rendered text stays the word the view chose. That word is what says which half
-  // of the night-and-morning pair is being shown -- 'Bedtime', 'Overnight',
-  // 'Night' -- and a CSS transform would make what a reader sees differ from what
-  // the domain produced, with 'Night' and 'Overnight' becoming indistinguishable
-  // to anything reading the header back.
-  historyHeaders(view).forEach((header, index) => {
-    const cell = element(
-      'th',
-      index === 0 ? 'history__header history__header--night' : 'history__header',
-      header,
-    );
+  // Every header, the night's included, is drawn the same way: upper case, bold,
+  // letter-spaced. A transform changes only how a word is drawn, never the text a
+  // reader or an oracle reads back, so 'Night' and 'Overnight' stay distinct.
+  historyHeaders(view).forEach((header) => {
+    const cell = element('th', 'history__header', header);
     cell.setAttribute('scope', 'col');
     headRow.append(cell);
   });
