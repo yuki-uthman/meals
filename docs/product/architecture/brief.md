@@ -398,6 +398,8 @@ Verification command: `npm run test:acceptance -- tests/acceptance/night-insulin
 Verification command: `npm run test:acceptance`
 ## Meal & Insulin Log product brief, value 5: the in-app number pad and the dose stepper
 
+> **Revised 2026-09-30.** The in-app number pad and its chips are removed. A glucose field is an ordinary input with inputmode='numeric', so tapping it opens the device's own number keyboard and nothing is drawn into the page; no 'last reading' suggestion is offered anywhere. The dose stepper stays. On the meal form, Glucose before and Glucose after sit side by side on one row, directly below the time, with Exercise and the Note below them. The oracle below is the revised one; the Constraints and Decisions that describe the pad's keys, chips and inputmode='none' are superseded by this note.
+
 ### Purpose
 Make glucose and dose entry a one-thumb job: tapping a glucose field opens an in-app number pad carrying chips for the readings the person is most likely to want, and a dose moves by exactly one unit with a minus and a plus button.
 
@@ -476,13 +478,13 @@ Preserved observation: A meal is still recorded from an empty slot with its food
 - `tests/support/accounts.ts`
 
 ### Public oracle
-Observation: Tapping a glucose field opens an in-app number pad with chips for the last reading; dose fields change by one unit with minus and plus buttons.
+Observation: Tapping a glucose field opens the device's number keyboard with nothing drawn in the page; dose fields change by one unit with minus and plus buttons.
 
-Stimulus: Account A owns a lunch today at 12:55 with before 112 and after 133, and a dinner yesterday at 19:10 with before 110. A browser at a 360 px viewport signs in, opens New meal from the Dinner slot's 'Not logged yet' card, and taps the glucose before field. It then keys 1, 5 and 0, keys a fourth digit 7, uses Delete, uses Clear, taps the 'Before last dinner 110' chip, and uses Done. It then uses Increase dose three times and Decrease dose once, and on a separate attempt uses Decrease dose on a dose of zero. Separately it fills the glucose after field directly, without the pad, and then focuses it.
+Stimulus: Account A owns a lunch today at 12:55 with before 112 and after 133, and a dinner yesterday at 19:10 with before 110. A browser at a 360 px viewport signs in, opens New meal from the Dinner slot's 'Not logged yet' card, taps each glucose field and types 142, then presses Increase three times and Decrease once, types 0 in the dose and presses Decrease.
 
-Expected: Tapping the field reveals a group named 'Number pad' carrying a chip reading 'Last reading 133 · 12:55' and a chip reading 'Before last dinner 110'. Keying 1, 5, 0 puts 150 in the field. The fourth digit leaves it at 150. Delete leaves 15. Clear leaves it empty. The chip puts 110 in the field and the pad stays open. Done closes the pad and the field still holds 110. Three Increase presses make the dose 3 and one Decrease makes it 2. Decrease on a dose of zero leaves it at zero. The page never scrolls horizontally. A value put into a glucose field directly survives focusing it: the field still holds it and the pad opens showing it, so the field remains an ordinary input that the pad assists rather than replaces.
+Expected: Each glucose field carries inputmode 'numeric', takes focus when tapped, and takes 142 typed on the keyboard. No group named 'Number pad' appears and no text on the screen offers a 'Last reading' or 'Before last' suggestion. The dose reads 1, 2, 3 after the three Increase presses and 2 after the Decrease, and Decrease at 0 leaves it at 0. The page never scrolls horizontally.
 
-Falsifier: The pad does not appear on tapping the field, or either chip is absent or carries the wrong number or time, or a digit does not append, or a fourth digit is accepted, or Delete does not remove exactly the rightmost digit, or Clear does not empty the field, or a chip does not fill the field or closes the pad, or Done does not close the pad or loses the value, or a step moves the dose by anything other than one, or the dose goes below zero, or the document scrolls horizontally at a 360 px viewport. It also fails if focusing a glucose field that already holds a value clears or discards that value.
+Falsifier: A glucose field's inputmode is not 'numeric', or an in-app pad or a reading suggestion appears when a glucose field is tapped, or typing does not reach the field, or a step moves the dose by anything but one unit, or Decrease takes it below 0, or the page scrolls horizontally at 360 px.
 
 ### Oracle and verification
 Oracle target locator: `tests/acceptance/number-pad.spec.ts`
