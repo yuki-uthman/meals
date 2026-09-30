@@ -59,13 +59,6 @@ import {
   NIGHT_WINDOW,
   type NightDraft,
 } from './domain/night';
-import {
-  lastReadingChip,
-  readingChips,
-  RECENT_MEALS_WINDOW,
-  type ReadingChip,
-  type RecentMeal,
-} from './domain/recent-readings';
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
 import { FOOD_FORM_TITLE, foodForm, type NameState } from './ui/food-form';
@@ -73,7 +66,7 @@ import {
   BACK_TO_HISTORY_LABEL,
   BACK_TO_LOOKUP_LABEL,
   mealDetailScreen, mealMissingScreen } from './ui/meal-detail';
-import { mealForm, mealFormTitle, type MealPadChips, type MealPadTarget } from './ui/meal-form';
+import { mealForm, mealFormTitle } from './ui/meal-form';
 import { nightForm, NIGHT_FORM_TITLE, type NightHistory } from './ui/night-form';
 import { historyScreen, HISTORY_SCROLLER_CLASS, type HistoryState } from './ui/history';
 import { lookupScreen, type LookupState, type LookupTab } from './ui/lookup';
@@ -253,23 +246,14 @@ const start = (): void => {
    */
   let nightHistory: NightHistory | null = null;
   /**
-   * The recent meals the pad's chips are read off. They are fetched before a
-   * form is shown, for the same reason the five nights are: a chip that arrived
-   * after the person had already started keying would be a moving target.
-   */
-  let recentMeals: readonly RecentMeal[] = [];
-  /**
    * Every meal this account has recorded, which is what the expected-after estimate
    * is read off. It is fetched before a meal form is shown, for the same reason the
-   * chips are: an estimate that appeared after the person had begun keying would be
+   * five nights are: an estimate that appeared after the person had begun keying would be
    * a moving target. Which meal the estimate is built from is the domain's rule.
    */
   let mealHistory: readonly MealInstance[] = [];
   /** Why the history could not be read, so the panel never claims nothing happened. */
   let mealHistoryMessage: string | null = null;
-  /** Which field the in-app pad is open on. Closed unless a glucose field asked. */
-  let padTarget: MealPadTarget = null;
-  let nightPadOpen = false;
   /** A refusal or retry from the screen the person is on, shown in place. */
   let formMessage: string | null = null;
   let saving = false;
@@ -340,20 +324,6 @@ const start = (): void => {
       ),
     );
 
-  /** The readings a chip may repeat, never a number this app worked out. */
-  const presentChips = (chips: readonly (ReadingChip | null)[]): readonly ReadingChip[] =>
-    chips.filter((chip): chip is ReadingChip => chip !== null);
-
-  /**
-   * The before field is offered both chips; the after field only the last
-   * reading, because there is no such thing as 'the after reading you usually
-   * start dinner on'. The meal being edited is excluded from its own history.
-   */
-  const mealChips = (draft: MealDraft): MealPadChips => ({
-    before: readingChips(recentMeals, draft.slot, draft.mealId),
-    after: presentChips([lastReadingChip(recentMeals, draft.mealId)]),
-  });
-
   const mealScreen = (draft: MealDraft): HTMLElement =>
     shell(
       {
@@ -366,22 +336,11 @@ const start = (): void => {
       mealForm(
         {
           draft,
-          padTarget,
-          chips: mealChips(draft),
           history: mealHistory,
           historyMessage: mealHistoryMessage,
           message: formMessage,
         },
         {
-          // Opening and closing the pad is a change to the field's own corner of
-          // the screen, so it is recorded here and deliberately NOT re-rendered:
-          // redrawing would replace the very input the pad writes into.
-          onOpenPad: (target) => {
-            padTarget = target;
-          },
-          onClosePad: () => {
-            padTarget = null;
-          },
           onSlot: (slot) => patchMeal({ slot }),
           onTime: (time) => patchMeal({ time }),
           onGlucoseBefore: (glucoseBefore) => patchMeal({ glucoseBefore }),
@@ -425,18 +384,9 @@ const start = (): void => {
         {
           draft,
           history,
-          padOpen: nightPadOpen,
-          chips: presentChips([lastReadingChip(recentMeals)]),
           message: formMessage,
         },
         {
-          // Recorded, not re-rendered, for the same reason as the meal screen's.
-          onOpenPad: () => {
-            nightPadOpen = true;
-          },
-          onClosePad: () => {
-            nightPadOpen = false;
-          },
           onUnits: (units) => patchNight({ units }),
           onTakenAt: (takenAt) => patchNight({ takenAt }),
           onBedtimeGlucose: (bedtimeGlucose) => patchNight({ bedtimeGlucose }),
@@ -726,8 +676,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = undefined;
   };
 
@@ -800,7 +748,6 @@ const start = (): void => {
         if (mealDraft !== null && mealDraft.mealId === first) {
           foodDraft = null;
           formMessage = null;
-          padTarget = null;
           screen = 'meal';
           render();
           return;
@@ -814,7 +761,6 @@ const start = (): void => {
         if (mealDraft !== null && mealDraft.mealId === null && mealDraft.date === first) {
           foodDraft = null;
           formMessage = null;
-          padTarget = null;
           screen = 'meal';
           render();
           return;
@@ -832,7 +778,6 @@ const start = (): void => {
           foodNameState = TYPED_NAME;
         }
         formMessage = null;
-        padTarget = null;
         screen = 'food';
         render();
         return;
@@ -841,7 +786,6 @@ const start = (): void => {
       if (name === 'night' && first !== undefined) {
         if (nightDraft !== null && nightHistory !== null && date === first) {
           formMessage = null;
-          nightPadOpen = false;
           screen = 'night';
           render();
           return;
@@ -972,8 +916,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = undefined;
     screen = 'history';
     await loadHistory();
@@ -1024,8 +966,8 @@ const start = (): void => {
   };
 
   /**
-   * The meals are read BEFORE the screen is shown, exactly as the night list and
-   * the pad's chips are. A search box that appeared while its material was still
+   * The meals are read BEFORE the screen is shown, exactly as the night list
+   * is. A search box that appeared while its material was still
    * in flight would either answer a word over half a log or quietly lose it.
    */
   const openLookupSection = async (): Promise<void> => {
@@ -1035,8 +977,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
     // A fresh search each time the section is opened: coming back to Lookup asks
     // what the person is looking for now, rather than answering an older question.
     lookupQuery = '';
@@ -1070,8 +1010,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = undefined;
     screen = 'day';
     date = localToday();
@@ -1145,7 +1083,6 @@ const start = (): void => {
     // it records against: an edit may never move the meal to today.
     const recordAgainst = eatenOn ?? localDateOf(found.meal.eatenAt);
 
-    if (!(await loadRecentMeals(recordAgainst))) return;
     if (!(await loadMealHistory())) return;
 
     readToken += 1;
@@ -1158,8 +1095,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = from;
     screen = 'meal';
     render();
@@ -1172,7 +1107,6 @@ const start = (): void => {
    * on today. The form is opened from the grid, so it keeps History's navigation.
    */
   const newMealFromHistory = async (eatenOn: IsoDate, slot: MealSlot): Promise<void> => {
-    if (!(await loadRecentMeals(eatenOn))) return;
     if (!(await loadMealHistory())) return;
 
     readToken += 1;
@@ -1184,8 +1118,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = 'history';
     screen = 'meal';
     render();
@@ -1201,9 +1133,6 @@ const start = (): void => {
       await endSession(outcome.message);
       return;
     }
-    // The bedtime glucose gets the same pad, so its chips are in hand before the
-    // screen is shown too.
-    if (!(await loadRecentMeals(opening))) return;
     // A step to another day while the read was in flight wins: the screen must
     // never open on one date holding another date's nights.
     if (opening !== date) return;
@@ -1219,26 +1148,9 @@ const start = (): void => {
     mealDraft = null;
     foodDraft = null;
     formMessage = null;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = from;
     screen = 'night';
     render();
-  };
-
-  /**
-   * The material the pad's chips are read off. A read that failed costs the
-   * chips and nothing else: filling in a meal must never wait on a convenience,
-   * so the form opens with a pad that simply carries no chips.
-   */
-  const loadRecentMeals = async (upTo: IsoDate): Promise<boolean> => {
-    const outcome = await logStore.recentMeals(upTo, RECENT_MEALS_WINDOW);
-    if (outcome.kind === 'session-ended') {
-      await endSession(outcome.message);
-      return false;
-    }
-    recentMeals = outcome.kind === 'loaded' ? outcome.meals : [];
-    return true;
   };
 
   /**
@@ -1260,7 +1172,6 @@ const start = (): void => {
 
   const logSlot = async (slot: MealSlot): Promise<void> => {
     const opening = date;
-    if (!(await loadRecentMeals(opening))) return;
     if (!(await loadMealHistory())) return;
     // A step to another day while the read was in flight wins, exactly as it
     // does for the night screen.
@@ -1273,7 +1184,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
     formSection = undefined;
     screen = 'meal';
     render();
@@ -1285,7 +1195,6 @@ const start = (): void => {
     if (meal === undefined) return;
 
     const opening = date;
-    if (!(await loadRecentMeals(opening))) return;
     if (!(await loadMealHistory())) return;
     if (opening !== date) return;
 
@@ -1296,7 +1205,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
     formSection = undefined;
     screen = 'meal';
     render();
@@ -1314,7 +1222,6 @@ const start = (): void => {
    */
   const logAgain = async (source: Meal): Promise<void> => {
     const opening = localToday();
-    if (!(await loadRecentMeals(opening))) return;
     if (!(await loadMealHistory())) return;
 
     date = opening;
@@ -1324,7 +1231,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
     formSection = undefined;
     screen = 'meal';
     render();
@@ -1362,7 +1268,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
     screen = 'detail';
 
     // Either the detail, or why not. Never nothing.
@@ -1388,7 +1293,6 @@ const start = (): void => {
     nightDraft = null;
     nightHistory = null;
     formMessage = null;
-    padTarget = null;
     screen = 'detail';
     render();
   };
@@ -1432,8 +1336,8 @@ const start = (): void => {
   };
 
   /**
-   * The catalogue is read BEFORE the screen is shown, exactly as the five nights and
-   * the pad's chips are: a list that arrived after the person had begun typing would
+   * The catalogue is read BEFORE the screen is shown, exactly as the five nights
+   * are: a list that arrived after the person had begun typing would
    * be a moving target. It is re-read on every opening, so what is offered is what
    * the store holds rather than what the last visit to this screen was holding.
    */
@@ -1442,9 +1346,6 @@ const start = (): void => {
     foodDraft = emptyFoodDraft;
     foodNameState = TYPED_NAME;
     formMessage = null;
-    // The pad belongs to the field it was opened on; leaving that screen closes
-    // it rather than carrying it to the next one.
-    padTarget = null;
     screen = 'food';
     render();
   };
@@ -1592,7 +1493,6 @@ const start = (): void => {
       mealDraft = null;
       foodDraft = null;
       formMessage = null;
-      padTarget = null;
       formSection = undefined;
       // The form is done, so its entry is replaced rather than left behind: Back
       // from what the save returns to must not reopen a form already recorded.
@@ -1648,7 +1548,6 @@ const start = (): void => {
       nightDraft = null;
       nightHistory = null;
       formMessage = null;
-      nightPadOpen = false;
       formSection = undefined;
       // The night is recorded, so its entry is replaced for the same reason.
       replaceNextEntry = true;
@@ -1684,8 +1583,6 @@ const start = (): void => {
     nightHistory = null;
     formMessage = null;
     saving = false;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = undefined;
     foodNameState = TYPED_NAME;
     creatingFood = false;
@@ -1693,7 +1590,6 @@ const start = (): void => {
     // of the account that has just left may ever be offered to the next one.
     catalogue = [];
     // Readings belong to the account that recorded them, so they go with it.
-    recentMeals = [];
     // So does the history an estimate would be built from: no estimate may ever be
     // based on another account's meal.
     mealHistory = [];
@@ -1774,8 +1670,6 @@ const start = (): void => {
     nightHistory = null;
     formMessage = null;
     saving = false;
-    padTarget = null;
-    nightPadOpen = false;
     formSection = undefined;
     foodNameState = TYPED_NAME;
     creatingFood = false;
@@ -1783,7 +1677,6 @@ const start = (): void => {
     catalogue = [];
     // A change of hands takes the previous person's readings with it: a chip must
     // never repeat a reading that belongs to somebody else.
-    recentMeals = [];
     // The same goes for the history an estimate would be built from.
     mealHistory = [];
     mealHistoryMessage = null;

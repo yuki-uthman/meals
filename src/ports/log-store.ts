@@ -57,12 +57,6 @@ export type NightWindowOutcome =
   | { readonly kind: 'retry'; readonly message: string }
   | { readonly kind: 'session-ended'; readonly message: string };
 
-export type RecentMealsOutcome =
-  | { readonly kind: 'loaded'; readonly meals: readonly RecentMeal[] }
-  /** The server could not be reached. The pad simply carries no chips. */
-  | { readonly kind: 'retry'; readonly message: string }
-  | { readonly kind: 'session-ended'; readonly message: string };
-
 /**
  * What the store says when the meal asked for did not come back. Row-level
  * security makes 'not yours' and 'not there' the same answer -- neither row is
@@ -154,13 +148,6 @@ export type LogStore = {
    * whole history comes back and the key is computed in one place.
    */
   mealHistory: () => Promise<MealHistoryOutcome>;
-  /**
-   * The `count` most recent meals on or before `onOrBefore`, newest first, with
-   * just the readings a chip needs. Which of them is 'the last reading' is the
-   * domain's rule, not this query's, so every candidate comes back and nothing
-   * about the pad's offer is decided in SQL.
-   */
-  recentMeals: (onOrBefore: IsoDate, count: number) => Promise<RecentMealsOutcome>;
   /**
    * Records a meal with its foods, or updates the meal the recording names. One
    * entry point for both, because adding the after reading later must update that

@@ -6,7 +6,6 @@ import {
   type NightDraft,
   type NightRow,
 } from '../domain/night';
-import type { ReadingChip } from '../domain/recent-readings';
 import { formScreen, notice, numberField } from './meal-form';
 
 // The night screen, as a pure function from a draft and the five-night list to a
@@ -31,17 +30,11 @@ export type NightHistory =
 export type NightFormState = {
   readonly draft: NightDraft;
   readonly history: NightHistory;
-  /** Whether the in-app pad is open on the bedtime glucose field. */
-  readonly padOpen?: boolean;
-  /** What the pad offers: readings this account recorded, and nothing derived. */
-  readonly chips?: readonly ReadingChip[];
   /** A refusal or retry message, shown in place with every value still filled in. */
   readonly message: string | null;
 };
 
 export type NightFormHandlers = {
-  readonly onOpenPad?: () => void;
-  readonly onClosePad?: () => void;
   readonly onUnits: (value: string) => void;
   readonly onTakenAt: (value: string) => void;
   readonly onBedtimeGlucose: (value: string) => void;
@@ -150,10 +143,10 @@ export const nightForm = (state: NightFormState, handlers: NightFormHandlers): H
     nightHistory(state.history),
     // The dose is required and comes first; the time and the bedtime glucose are
     // optional, because a person who took their basal and did not measure must
-    // still be able to record the dose. Each is a real labelled input, so value 5
-    // can add the stepper and the number pad as controls that write into them.
-    // The same two controls as the meal screen, because a person keying a number
-    // at 22:30 wants the same thumb-sized target as at noon.
+    // still be able to record the dose. Each is a real labelled input that opens
+    // the device's own number keyboard, and the dose carries the same stepper as
+    // the meal screen, because a person keying a number at 22:30 wants the same
+    // thumb-sized target as at noon.
     numberField('night-units', DOSE_LABEL, 'dose', draft.units, handlers.onUnits, {
       stepper: true,
     }),
@@ -164,14 +157,6 @@ export const nightForm = (state: NightFormState, handlers: NightFormHandlers): H
       'glucose',
       draft.bedtimeGlucose,
       handlers.onBedtimeGlucose,
-      {
-        pad: {
-          chips: state.chips ?? [],
-          isOpen: state.padOpen === true,
-          onOpen: () => handlers.onOpenPad?.(),
-          onClose: () => handlers.onClosePad?.(),
-        },
-      },
     ),
   );
 

@@ -16,8 +16,6 @@ import {
 } from '../domain/expected-after';
 import { repeatSourceText, type FoodDraft, type MealDraft } from '../domain/meal-draft';
 import type { MealInstance } from '../domain/meal-identity';
-import type { ReadingChip } from '../domain/recent-readings';
-import { attachNumberPad, forgetOpenPad } from './number-pad';
 import { doseStepper } from './stepper';
 
 // The New meal and Edit meal screen, as a pure function from a draft to a DOM
@@ -25,10 +23,9 @@ import { doseStepper } from './stepper';
 // nothing. Whether a draft may be saved is a rule in src/domain, and the Save
 // control itself lives in the frame, so this screen has one job: show the meal.
 //
-// Every numeric field here is a real labelled input that works with the device
-// keyboard. Value 5 adds the in-app number pad and the dose stepper as controls
-// that write into these same inputs, so a field keeps one accessible name and one
-// value for the whole delivery.
+// Every numeric field here is a real labelled input that opens the device's own
+// number keyboard. The dose also carries a stepper that writes into that same
+// input, so a field keeps one accessible name and one value for the whole delivery.
 
 // ------------------------------------------------- fields, shared by both forms
 
@@ -76,29 +73,16 @@ export const textField = (
   return wrapper;
 };
 
-/**
- * The in-app pad attached to a glucose field: the chips it offers, whether it is
- * currently open on this field, and how it opens and closes. A field with no pad
- * keeps the device keyboard, which is what the food amount does.
- */
-export type PadControl = {
-  readonly chips: readonly ReadingChip[];
-  readonly isOpen: boolean;
-  readonly onOpen: () => void;
-  readonly onClose: () => void;
-};
-
 export type NumberFieldControls = {
-  readonly pad?: PadControl;
   /** A minus and a plus that move this dose by exactly one unit. */
   readonly stepper?: boolean;
 };
 
 /**
- * A labelled number input. With no controls the keyboard that opens is the
- * device's own.
+ * A labelled number input. The keyboard that opens is always the device's own:
+ * whole numbers for a glucose reading, decimals for a dose or an amount.
  *
- * Where a pad or a stepper is asked for, it is added *around* this same input:
+ * Where a stepper is asked for, it is added *around* this same input:
  * the field keeps its id, its label, its value and its editability, so the
  * accessible name a person and an oracle both find it by never moves, and every
  * screen built on this field goes on working untouched.
@@ -120,10 +104,7 @@ export const numberField = (
   input.type = 'number';
   input.min = '0';
   input.step = NUMERIC_STEPS[kind];
-  // A field with the in-app pad asks the phone for no keyboard at all, so the
-  // pad has the screen to itself. It stays an ordinary focusable input, so a
-  // hardware keyboard and an automated fill both still reach it.
-  input.inputMode = controls.pad === undefined ? (kind === 'glucose' ? 'numeric' : 'decimal') : 'none';
+  input.inputMode = kind === 'glucose' ? 'numeric' : 'decimal';
   input.value = value;
   input.addEventListener('input', () => onInput(input.value));
 
@@ -131,20 +112,6 @@ export const numberField = (
     fieldLabel(id, labelText),
     controls.stepper === true ? doseStepper(input, onInput) : input,
   );
-
-  const { pad } = controls;
-  if (pad !== undefined) {
-    // The pad is mounted and unmounted beside this input rather than by redrawing
-    // the screen. Opening it must not replace, reset or detach the field: a
-    // re-render on focus would eat a hardware-keyboard user's first keystroke.
-    attachNumberPad(
-      wrapper,
-      input,
-      pad.chips,
-      { onValue: onInput, onOpened: () => pad.onOpen(), onClosed: () => pad.onClose() },
-      pad.isOpen,
-    );
-  }
 
   return wrapper;
 };
@@ -239,9 +206,6 @@ export const notice = (message: string): HTMLElement => {
 };
 
 export const formScreen = (className: string): HTMLElement => {
-  // A fresh form screen has no pad open yet, and any pad from the screen it
-  // replaces went with that screen's DOM.
-  forgetOpenPad();
   const screen = document.createElement('div');
   screen.className = `form ${className}`;
   return screen;
@@ -249,27 +213,8 @@ export const formScreen = (className: string): HTMLElement => {
 
 // ------------------------------------------------------------- the meal screen
 
-/** Which glucose field the in-app pad is currently open on, if any. */
-export type MealPadTarget = 'glucose-before' | 'glucose-after' | null;
-
-/**
- * The chips each glucose field's pad offers. They differ on purpose: the before
- * field is offered what this person tends to sit at going into this slot, while
- * the after field has no such thing and is offered only the last reading.
- */
-export type MealPadChips = {
-  readonly before: readonly ReadingChip[];
-  readonly after: readonly ReadingChip[];
-};
-
-export const NO_PAD_CHIPS: MealPadChips = { before: [], after: [] };
-
 export type MealFormState = {
   readonly draft: MealDraft;
-  /** Closed unless a glucose field was tapped. */
-  readonly padTarget?: MealPadTarget;
-  /** Absent where nothing was recorded to put on a chip. */
-  readonly chips?: MealPadChips;
   /**
    * Every meal this account has recorded, which is the material the expected-after
    * estimate is read off. Absent reads as no history at all, and the panel then
@@ -287,8 +232,6 @@ export type MealFormState = {
 };
 
 export type MealFormHandlers = {
-  readonly onOpenPad?: (target: Exclude<MealPadTarget, null>) => void;
-  readonly onClosePad?: () => void;
   readonly onSlot: (slot: MealSlot) => void;
   readonly onTime: (time: string) => void;
   readonly onGlucoseBefore: (value: string) => void;
@@ -417,13 +360,17 @@ const expectedAfterBody = (view: ExpectedAfterView): readonly HTMLElement[] => {
   return [label, line, source];
 };
 
+/** Two fields on one row, each taking half of it. */
+const readingPair = (first: HTMLElement, second: HTMLElement): HTMLElement => {
+  const row = document.createElement('div');
+  row.className = 'form__pair';
+  row.append(first, second);
+  return row;
+};
+
 export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTMLElement => {
   const screen = formScreen('form--meal');
   const { draft } = state;
-  const chips = state.chips ?? NO_PAD_CHIPS;
-  const padTarget = state.padTarget ?? null;
-  const openPad = (target: Exclude<MealPadTarget, null>): void => handlers.onOpenPad?.(target);
-  const closePad = (): void => handlers.onClosePad?.();
 
   // The panel is live: the slot, the before reading and the dose all change what it
   // says, and none of them redraws the form. So this screen keeps its own copy of
@@ -503,38 +450,24 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       onSlot,
     ),
     timeField('meal-time', draft.time, handlers.onTime),
-    numberField(
-      'meal-glucose-before',
-      'Glucose before',
-      'glucose',
-      draft.glucoseBefore,
-      onGlucoseBefore,
-      {
-        pad: {
-          chips: chips.before,
-          isOpen: padTarget === 'glucose-before',
-          onOpen: () => openPad('glucose-before'),
-          onClose: () => closePad(),
-        },
-      },
-    ),
-    // The after reading sits directly below the before: the two are read as a
-    // pair, and the after is what an edit most often comes back to add. Exercise
-    // and the note matter less, so they sit last.
-    numberField(
-      'meal-glucose-after',
-      'Glucose after',
-      'glucose',
-      draft.glucoseAfter,
-      handlers.onGlucoseAfter,
-      {
-        pad: {
-          chips: chips.after,
-          isOpen: padTarget === 'glucose-after',
-          onOpen: () => openPad('glucose-after'),
-          onClose: () => closePad(),
-        },
-      },
+    // The two readings side by side: they are read as a pair, and the after is
+    // what an edit most often comes back to add. Exercise and the note matter
+    // less, so they sit last.
+    readingPair(
+      numberField(
+        'meal-glucose-before',
+        'Glucose before',
+        'glucose',
+        draft.glucoseBefore,
+        onGlucoseBefore,
+      ),
+      numberField(
+        'meal-glucose-after',
+        'Glucose after',
+        'glucose',
+        draft.glucoseAfter,
+        handlers.onGlucoseAfter,
+      ),
     ),
     // The panel sits beside the after reading, because that is the number it is
     // about -- and it only ever reports beside it, never into it.
