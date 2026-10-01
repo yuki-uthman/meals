@@ -152,6 +152,8 @@ const start = (): void => {
   let historyToday: IsoDate = localToday();
   let historyMessage: string | null = null;
   let historyView: HistoryView = 'before';
+  /** The food the grid is searched by; empty shows every day. */
+  let historyQuery = '';
   /** Guards against a slow grid read from an earlier account landing on a later one. */
   let historyToken = 0;
   /**
@@ -414,8 +416,13 @@ const start = (): void => {
       { date, isToday: date === localToday(), heading: 'History', tab: 'history' },
       dayHandlers,
       historyScreen(
-        { view: historyView, state: historySectionState() },
+        { view: historyView, state: historySectionState(), query: historyQuery },
         {
+          // The grid redraws itself as the field is typed into; this only keeps
+          // what was typed, so a redraw for any other reason keeps it too.
+          onQuery: (query) => {
+            historyQuery = query;
+          },
           // The view colours what is already in hand, so choosing one is a redraw
           // and never another read.
           onView: (next) => {

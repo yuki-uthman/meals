@@ -294,7 +294,8 @@ const toMorningMeal = (row: MorningRow): MorningMeal => ({
   glucoseBefore: asNumber(row.glucose_before),
 });
 
-const RECENT_MEAL_SELECT = 'id, slot, eaten_on, eaten_at, glucose_before, glucose_after';
+const RECENT_MEAL_SELECT =
+  'id, slot, eaten_on, eaten_at, glucose_before, glucose_after, meal_foods ( name )';
 
 type RecentMealRow = {
   id?: unknown;
@@ -303,6 +304,7 @@ type RecentMealRow = {
   eaten_at?: unknown;
   glucose_before?: unknown;
   glucose_after?: unknown;
+  meal_foods?: unknown;
 };
 
 const toRecentMeal = (row: RecentMealRow): RecentMeal => ({
@@ -312,6 +314,9 @@ const toRecentMeal = (row: RecentMealRow): RecentMeal => ({
   eatenAt: new Date(String(row.eaten_at)),
   glucoseBefore: asNumber(row.glucose_before),
   glucoseAfter: asNumber(row.glucose_after),
+  foods: Array.isArray(row.meal_foods)
+    ? (row.meal_foods as { name?: unknown }[]).map((food) => String(food.name))
+    : [],
 });
 
 /** A meal as the instance list reads it: the day it belongs to, and its foods. */

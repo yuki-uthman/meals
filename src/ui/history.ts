@@ -3,6 +3,9 @@ import {
   historyHeaders,
   historyLegend,
   historyViewLabel,
+  noFoodMatches,
+  searchHistoryRows,
+  HISTORY_SEARCH_LABEL,
   HISTORY_VIEWS,
   type CellTarget,
   type AwaitingCell,
@@ -37,10 +40,13 @@ export type HistoryState =
 export type HistoryScreenView = {
   readonly view: HistoryView;
   readonly state: HistoryState;
+  /** The food being searched for; empty shows every day. */
+  readonly query: string;
 };
 
 export type HistoryHandlers = {
   readonly onView: (view: HistoryView) => void;
+  readonly onQuery: (query: string) => void;
   readonly onOpen: (target: CellTarget) => void;
   readonly onRetry: () => void;
 };
@@ -94,6 +100,18 @@ const viewChooser = (view: HistoryView, handlers: HistoryHandlers): HTMLElement 
     );
   }
   return group;
+};
+
+/**
+ * A cell that does not hold the food being searched for is greyed out. It stays a
+ * control, because the day around a match is still worth opening.
+ */
+const dim = (control: HTMLElement, dimmed: boolean): HTMLElement => {
+  if (dimmed) {
+    control.classList.add('history__tap--dimmed');
+    control.setAttribute('data-dimmed', 'true');
+  }
+  return control;
 };
 
 /**
@@ -205,11 +223,14 @@ const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: His
     for (const cell of row.cells) {
       const slot = element('td', 'history__cell');
       slot.append(
-        cell.kind === 'filled'
-          ? filledCell(cell, handlers)
-          : cell.kind === 'awaiting'
-            ? awaitingCell(cell, handlers)
-            : emptyCell(cell, handlers),
+        dim(
+          cell.kind === 'filled'
+            ? filledCell(cell, handlers)
+            : cell.kind === 'awaiting'
+              ? awaitingCell(cell, handlers)
+              : emptyCell(cell, handlers),
+          cell.dimmed,
+        ),
       );
       line.append(slot);
     }
@@ -250,6 +271,39 @@ const legend = (view: HistoryView): HTMLElement => {
   return list;
 };
 
+/**
+ * The field the grid is searched by food with. Its label is hidden from the eye
+ * and present to everything else, as Lookup's is.
+ */
+const searchField = (query: string): { readonly box: HTMLElement; readonly field: HTMLInputElement } => {
+  const box = element('div', 'history__search');
+  box.setAttribute('role', 'search');
+  const field = document.createElement('input');
+  field.className = 'field__input history__search-field';
+  field.id = 'history-search';
+  field.type = 'search';
+  field.placeholder = 'Search by food';
+  field.value = query;
+  const label = document.createElement('label');
+  label.className = 'visually-hidden';
+  label.setAttribute('for', field.id);
+  label.textContent = HISTORY_SEARCH_LABEL;
+  box.append(label, field);
+  return { box, field };
+};
+
+/** The grid narrowed to the food typed, or the words saying no day holds it. */
+const gridFor = (
+  rows: readonly HistoryRow[],
+  query: string,
+  view: HistoryView,
+  handlers: HistoryHandlers,
+): HTMLElement => {
+  const shown = searchHistoryRows(rows, query);
+  if (shown.length === 0) return element('p', 'history__no-match', noFoodMatches(query));
+  return gridTable(shown, view, handlers);
+};
+
 export const historyScreen = (
   view: HistoryScreenView,
   handlers: HistoryHandlers,
@@ -284,9 +338,24 @@ export const historyScreen = (
   const region = document.createElement('section');
   region.className = HISTORY_SCROLLER_CLASS;
   region.setAttribute('aria-label', HISTORY_REGION_LABEL);
-  region.append(gridTable(view.state.rows, view.view, handlers));
+  const rows = view.state.rows;
+  region.append(gridFor(rows, view.query, view.view, handlers));
 
-  screen.append(region);
+  const search = searchField(view.query);
+  /**
+   * Typing redraws THE GRID and nothing else, as Lookup's field does: rebuilding
+   * the whole screen would replace the field being typed into and take the caret
+   * with it. What was typed is still recorded outside the screen, so a redraw for
+   * any other reason keeps it.
+   */
+  search.field.addEventListener('input', () => {
+    const typed = search.field.value;
+    handlers.onQuery(typed);
+    region.replaceChildren(gridFor(rows, typed, view.view, handlers));
+    region.scrollTop = 0;
+  });
+
+  screen.append(search.box, region);
   screen.append(element('p', 'history__caption', historyCaption(view.view)));
   screen.append(legend(view.view));
   return screen;

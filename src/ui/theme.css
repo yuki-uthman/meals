@@ -1062,6 +1062,28 @@ label {
   flex: 0 0 auto;
 }
 
+/* The food search sits beneath the view tabs, above the legend and the grid it
+   narrows. */
+.history-screen > .history__search {
+  order: 2;
+  flex: 0 0 auto;
+  display: flex;
+  min-width: 0;
+  padding: 0 var(--space-2);
+}
+
+.history__search-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.history__no-match {
+  margin: 0;
+  padding: var(--space-3) var(--space-1);
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
 .history-screen > .history {
   order: 3;
 }
@@ -1217,6 +1239,14 @@ label {
    the grid being allowed to overflow. */
 .history__tap--pair {
   font-size: 0.6875rem;
+}
+
+/* A cell that does not hold the food being searched for: greyed out, band and
+   all, so the meals that do hold it are what the eye lands on. It is still a
+   control. */
+.history__tap--dimmed {
+  opacity: 0.25;
+  filter: grayscale(1);
 }
 
 .history__caption {

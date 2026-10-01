@@ -162,6 +162,10 @@ export type FilledCell = {
   /** The accessible name: its day, its column and its readings, said in words. */
   readonly name: string;
   readonly target: CellTarget;
+  /** The names of the foods behind it; none for a night or an empty slot. */
+  readonly foods: readonly string[];
+  /** Greyed out because it does not hold the food being searched for. */
+  readonly dimmed: boolean;
 };
 
 /**
@@ -174,6 +178,10 @@ export type EmptyCell = {
   /** Its day and its column in words, because a blank square says nothing. */
   readonly name: string;
   readonly target: CellTarget;
+  /** The names of the foods behind it; none for a night or an empty slot. */
+  readonly foods: readonly string[];
+  /** Greyed out because it does not hold the food being searched for. */
+  readonly dimmed: boolean;
 };
 
 /**
@@ -187,6 +195,10 @@ export type AwaitingCell = {
   /** Its day and its column, and that it is recorded with no reading yet. */
   readonly name: string;
   readonly target: CellTarget;
+  /** The names of the foods behind it; none for a night or an empty slot. */
+  readonly foods: readonly string[];
+  /** Greyed out because it does not hold the food being searched for. */
+  readonly dimmed: boolean;
 };
 
 export type HistoryCell = FilledCell | EmptyCell | AwaitingCell;
@@ -272,13 +284,22 @@ const empty = (label: string, column: string, target: CellTarget): EmptyCell => 
   kind: 'empty',
   name: emptyName(label, column),
   target,
+  foods: [],
+  dimmed: false,
 });
 
 /** Recorded, and waiting for the reading this view would show. */
-const awaiting = (label: string, column: string, target: CellTarget): AwaitingCell => ({
+const awaiting = (
+  label: string,
+  column: string,
+  target: CellTarget,
+  foods: readonly string[],
+): AwaitingCell => ({
   kind: 'awaiting',
   name: `${label} ${column} recorded, no reading yet`,
   target,
+  foods,
+  dimmed: false,
 });
 
 const byTimeAscending = (a: RecentMeal, b: RecentMeal): number =>
@@ -311,7 +332,7 @@ const mealCell = (
 
   // A meal that is recorded but has no reading to show in this view is still an
   // entry: it says so, and it opens THAT meal rather than offering a second one.
-  const nothingToShow = (): AwaitingCell => awaiting(label, column, target);
+  const nothingToShow = (): AwaitingCell => awaiting(label, column, target, meal.foods);
 
   if (view === 'before') {
     if (before === null) return nothingToShow();
@@ -323,6 +344,8 @@ const mealCell = (
       bandKind: 'level',
       name: named(label, column, readings),
       target,
+      foods: meal.foods,
+      dimmed: false,
     };
   }
 
@@ -338,6 +361,8 @@ const mealCell = (
     bandKind: 'change',
     name: named(label, column, readings),
     target,
+    foods: meal.foods,
+    dimmed: false,
   };
 };
 
@@ -356,7 +381,7 @@ const nightCell = (
   // that record's own editor and, where there is no record, where one is filled in.
   if (night === undefined) return empty(label, column, target);
   // A night that IS recorded but has nothing to show here is awaiting a reading.
-  const nothingToShow = (): AwaitingCell => awaiting(label, column, target);
+  const nothingToShow = (): AwaitingCell => awaiting(label, column, target, []);
 
   const bedtime = night.bedtimeGlucose;
 
@@ -370,6 +395,8 @@ const nightCell = (
       bandKind: 'level',
       name: named(label, column, readings),
       target,
+      foods: [],
+      dimmed: false,
     };
   }
 
@@ -387,6 +414,8 @@ const nightCell = (
     bandKind: 'change',
     name: named(label, column, readings),
     target,
+    foods: [],
+    dimmed: false,
   };
 };
 
@@ -420,6 +449,48 @@ export const historyRows = (
     };
   });
 };
+
+// ------------------------------------------------------------ food search
+
+const normaliseFood = (text: string): string => text.trim().toLowerCase();
+
+/** Whether a cell is a meal with a food whose name contains what was typed. */
+export const cellHasFood = (cell: HistoryCell, query: string): boolean => {
+  const wanted = normaliseFood(query);
+  return cell.foods.some((food) => normaliseFood(food).includes(wanted));
+};
+
+/**
+ * The grid narrowed to one food. Only the days with a meal holding that food are
+ * kept, and within them every cell that does not hold it is greyed out, so the
+ * matching meals stand out against the rest of their day. The month separators
+ * are worked out again over the rows that are left, so a month whose first days
+ * were dropped is still named. An empty query leaves the grid as it was.
+ */
+export const searchHistoryRows = (
+  rows: readonly HistoryRow[],
+  query: string,
+): readonly HistoryRow[] => {
+  if (normaliseFood(query) === '') return rows;
+  let previousMonth: string | null = null;
+  return rows
+    .filter((row) => row.cells.some((cell) => cellHasFood(cell, query)))
+    .map((row): HistoryRow => {
+      const month = historyMonthLabel(row.date);
+      const monthLabel = month === previousMonth ? null : month;
+      previousMonth = month;
+      return {
+        ...row,
+        monthLabel,
+        cells: row.cells.map((cell) => ({ ...cell, dimmed: !cellHasFood(cell, query) })),
+      };
+    });
+};
+
+/** What the grid says when no day holds the food being searched for. */
+export const noFoodMatches = (query: string): string => `No meals with “${query.trim()}”.`;
+
+export const HISTORY_SEARCH_LABEL = 'Search history by food';
 
 // ------------------------------------------------------------------- legend
 
