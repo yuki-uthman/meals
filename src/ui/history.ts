@@ -3,8 +3,8 @@ import {
   historyHeaders,
   historyLegend,
   historyViewLabel,
-  noFoodMatches,
   searchHistoryRows,
+  suggestedFoods,
   HISTORY_SEARCH_LABEL,
   HISTORY_VIEWS,
   type CellTarget,
@@ -35,7 +35,12 @@ import {
 export type HistoryState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'failed'; readonly message: string }
-  | { readonly kind: 'loaded'; readonly rows: readonly HistoryRow[] };
+  | {
+      readonly kind: 'loaded';
+      readonly rows: readonly HistoryRow[];
+      /** Every food the record holds, most recently eaten first: what the search offers. */
+      readonly foods: readonly string[];
+    };
 
 export type HistoryScreenView = {
   readonly view: HistoryView;
@@ -272,10 +277,16 @@ const legend = (view: HistoryView): HTMLElement => {
 };
 
 /**
- * The field the grid is searched by food with. Its label is hidden from the eye
- * and present to everything else, as Lookup's is.
+ * The field the grid is searched by food with, and the foods it offers as it is
+ * typed into. Its label is hidden from the eye and present to everything else, as
+ * Lookup's is. The offers float OVER the grid rather than pushing it down, so
+ * typing never moves a cell.
  */
-const searchField = (query: string): { readonly box: HTMLElement; readonly field: HTMLInputElement } => {
+const searchField = (
+  query: string,
+  foods: readonly string[],
+  onSearch: (query: string) => void,
+): HTMLElement => {
   const box = element('div', 'history__search');
   box.setAttribute('role', 'search');
   const field = document.createElement('input');
@@ -283,25 +294,66 @@ const searchField = (query: string): { readonly box: HTMLElement; readonly field
   field.id = 'history-search';
   field.type = 'search';
   field.placeholder = 'Search by food';
+  field.autocomplete = 'off';
   field.value = query;
+  field.setAttribute('role', 'combobox');
+  field.setAttribute('aria-autocomplete', 'list');
+  field.setAttribute('aria-controls', 'history-search-foods');
   const label = document.createElement('label');
   label.className = 'visually-hidden';
   label.setAttribute('for', field.id);
   label.textContent = HISTORY_SEARCH_LABEL;
-  box.append(label, field);
-  return { box, field };
-};
 
-/** The grid narrowed to the food typed, or the words saying no day holds it. */
-const gridFor = (
-  rows: readonly HistoryRow[],
-  query: string,
-  view: HistoryView,
-  handlers: HistoryHandlers,
-): HTMLElement => {
-  const shown = searchHistoryRows(rows, query);
-  if (shown.length === 0) return element('p', 'history__no-match', noFoodMatches(query));
-  return gridTable(shown, view, handlers);
+  const list = element('div', 'history__suggestions');
+  list.id = 'history-search-foods';
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-label', 'Foods you have eaten');
+
+  const close = (): void => {
+    list.replaceChildren();
+    list.hidden = true;
+    field.setAttribute('aria-expanded', 'false');
+  };
+
+  const offer = (typed: string): void => {
+    const names = suggestedFoods(foods, typed);
+    if (names.length === 0) {
+      close();
+      return;
+    }
+    list.replaceChildren(
+      ...names.map((name) => {
+        const option = element('div', 'history__suggestion', name);
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', 'false');
+        // Pressed before the field loses focus, so the choice lands before the
+        // offers are closed by the blur.
+        option.addEventListener('mousedown', (event) => event.preventDefault());
+        option.addEventListener('click', () => {
+          field.value = name;
+          close();
+          onSearch(name);
+        });
+        return option;
+      }),
+    );
+    list.hidden = false;
+    field.setAttribute('aria-expanded', 'true');
+  };
+
+  close();
+  field.addEventListener('input', () => {
+    onSearch(field.value);
+    offer(field.value);
+  });
+  field.addEventListener('focus', () => offer(field.value));
+  field.addEventListener('blur', close);
+  field.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+
+  box.append(label, field, list);
+  return box;
 };
 
 export const historyScreen = (
@@ -339,23 +391,23 @@ export const historyScreen = (
   region.className = HISTORY_SCROLLER_CLASS;
   region.setAttribute('aria-label', HISTORY_REGION_LABEL);
   const rows = view.state.rows;
-  region.append(gridFor(rows, view.query, view.view, handlers));
+  region.append(gridTable(searchHistoryRows(rows, view.query), view.view, handlers));
 
-  const search = searchField(view.query);
   /**
-   * Typing redraws THE GRID and nothing else, as Lookup's field does: rebuilding
+   * Searching redraws THE GRID and nothing else, as Lookup's field does: rebuilding
    * the whole screen would replace the field being typed into and take the caret
-   * with it. What was typed is still recorded outside the screen, so a redraw for
-   * any other reason keeps it.
+   * with it. The rows are the same rows, only greyed differently, so the grid stays
+   * scrolled exactly where it was. What was typed is still recorded outside the
+   * screen, so a redraw for any other reason keeps it.
    */
-  search.field.addEventListener('input', () => {
-    const typed = search.field.value;
+  const search = searchField(view.query, view.state.foods, (typed) => {
     handlers.onQuery(typed);
-    region.replaceChildren(gridFor(rows, typed, view.view, handlers));
-    region.scrollTop = 0;
+    const scrolled = region.scrollTop;
+    region.replaceChildren(gridTable(searchHistoryRows(rows, typed), view.view, handlers));
+    region.scrollTop = scrolled;
   });
 
-  screen.append(search.box, region);
+  screen.append(search, region);
   screen.append(element('p', 'history__caption', historyCaption(view.view)));
   screen.append(legend(view.view));
   return screen;
