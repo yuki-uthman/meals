@@ -2,7 +2,7 @@
 // judged on -- which reading sits in which column, and which band it falls in --
 // is a pure function of what the store handed back.
 //
-// One row per calendar date, newest first, and four columns: breakfast, lunch,
+// One row per calendar date, oldest first (today last, at the bottom), and four columns: breakfast, lunch,
 // dinner, and then that day's own night, so reading a row left to right is the
 // day as it happened, ending at bedtime.
 //
@@ -399,7 +399,11 @@ const nightCell = (
   };
 };
 
-/** One row per date, newest first: breakfast, lunch, dinner, then that night. */
+/**
+ * One row per date, OLDEST first so today is the last row, sitting at the bottom
+ * of the screen just above the tab bar: breakfast, lunch, dinner, then that night.
+ * `dates` is taken newest first, as historyDates returns it.
+ */
 export const historyRows = (
   window: HistoryWindow,
   dates: readonly IsoDate[],
@@ -410,7 +414,7 @@ export const historyRows = (
   // the label goes on the first row of each month rather than on a fixed set of
   // twelve, so the separator marks THIS span and nothing wider.
   let previousMonth: string | null = null;
-  return dates.map((date): HistoryRow => {
+  return [...dates].reverse().map((date): HistoryRow => {
     const label = shortNightDate(date);
     const month = historyMonthLabel(date);
     const monthLabel = month === previousMonth ? null : month;

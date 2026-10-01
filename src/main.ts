@@ -79,6 +79,9 @@ import {
 import { shell, type ShellHandlers, type ShellState, type ShellTab } from './ui/shell';
 import { emptySignInState, signInScreen, type SignInState } from './ui/sign-in';
 
+// The grid opens at its END, where today is: an offset past the last row clamps there.
+const HISTORY_AT_BOTTOM = Number.MAX_SAFE_INTEGER;
+
 const mount = (): HTMLElement => {
   const root = document.getElementById('app');
   if (root === null) throw new Error('Missing #app mount point');
@@ -159,7 +162,7 @@ const start = (): void => {
    * point of going back is to carry on where you were, and that is worst exactly
    * where it matters most -- part-way down somebody's paper log being copied in.
    */
-  let historyScroll = 0;
+  let historyScroll = HISTORY_AT_BOTTOM;
   /**
    * Whether the next render REPLACES the current history entry rather than pushing
    * one. True for the very first screen, so Back from it leaves the site as the
@@ -1600,7 +1603,7 @@ const start = (): void => {
     historyMessage = null;
     historyView = 'before';
     // Where the previous person had scrolled to goes with their grid.
-    historyScroll = 0;
+    historyScroll = HISTORY_AT_BOTTOM;
     // So do the meals a lookup matches over, and what was typed to search them: a
     // lookup may never reach a meal of the account that has just left.
     lookupToken += 1;
@@ -1686,7 +1689,7 @@ const start = (): void => {
     historyMessage = null;
     historyView = 'before';
     // And where the previous person had scrolled to in it.
-    historyScroll = 0;
+    historyScroll = HISTORY_AT_BOTTOM;
     // And for the lookup: a search may never match a meal of the previous account's.
     lookupToken += 1;
     lookupMeals = null;

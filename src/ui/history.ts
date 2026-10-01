@@ -12,7 +12,7 @@ import {
   type HistoryView,
 } from '../domain/history';
 
-// The History grid: one row per calendar date, newest first, and four columns
+// The History grid: one row per calendar date, oldest first so today is the bottom row, and four columns
 // read left to right as the day happened -- breakfast, lunch and dinner, then
 // that day's night.
 //
