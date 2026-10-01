@@ -687,9 +687,11 @@ const rowFor = async (page: Page, daysAgo: number): Promise<Locator> => {
     await expect(matching, `exactly one row for ${spokenDayName(daysAgo)}`).toHaveCount(1);
     return matching.first();
   }
-  // A list exposes no row header. Its rows are one per date, newest first, which is asserted
-  // in its own right, so the row is taken by position and its short label checked.
-  const row = (await dayRows(page)).nth(daysAgo);
+  // A list exposes no row header. Its rows are one per date, oldest first so today is the
+  // last, which is asserted in its own right, so the row is taken by position from the end
+  // and its short label checked.
+  const all = await dayRows(page);
+  const row = all.nth((await all.count()) - 1 - daysAgo);
   expect(
     await textOf(await labelOf(row)),
     `row ${daysAgo + 1} is the date ${daysAgo} day(s) ago`,
@@ -1043,18 +1045,27 @@ test('the grid opens on Before: one row per day, four chronological columns, col
     await rowFor(phone, daysAgo);
   }
 
-  // Newest first. Read off each row's LABEL, not its whole text, which runs the label
-  // into the first reading.
+  // Oldest first, so today is the LAST row, at the bottom of the screen just above the tab
+  // bar, with yesterday above it. Read off each row's LABEL, not its whole text, which runs
+  // the label into the first reading.
+  const ordered = await dayRows(phone);
+  const total = await ordered.count();
   expect(
-    await textOf(await labelOf((await dayRows(phone)).first())),
-    'the newest date is first',
+    await textOf(await labelOf(ordered.last())),
+    'the newest date is last',
   ).toMatch(dayLabel(0));
   for (const daysAgo of [1, MINIMUM_ROWS - 1]) {
     expect(
-      await textOf(await labelOf((await dayRows(phone)).nth(daysAgo))),
-      `row ${daysAgo + 1} is the date ${daysAgo} day(s) ago`,
+      await textOf(await labelOf(ordered.nth(total - 1 - daysAgo))),
+      `row ${total - daysAgo} is the date ${daysAgo} day(s) ago`,
     ).toMatch(dayLabel(daysAgo));
   }
+
+  // The grid opens scrolled to its end, so today is on screen without any scrolling.
+  await expect(
+    await labelOf(ordered.last()),
+    "today's row is visible as soon as the grid opens",
+  ).toBeInViewport();
 
   // The columns, left to right: the day's meals, then the night half that is being shown.
   const gridText = await textOf(grid(phone));
@@ -1651,15 +1662,18 @@ test('a month separator is a landmark, told apart from the day labels it sits am
   // A month rendered like the dates is one more line of the same grey doing nothing, and a
   // landmark you cannot pick out is not one.
   //
-  // The separator taken is the CURRENT month's separator, which sits near the TOP of the newest-first grid. The
-  // oldest month's sits near the bottom, where there is almost nothing left to scroll, so a
-  // stationary row there would read as a stuck one -- a false negative, not a measurement.
+  // The separator taken is the OLDEST month's separator, which sits near the TOP of the
+  // oldest-first grid. The current month's sits near the bottom, where there is almost
+  // nothing left to scroll, so a stationary row there would read as a stuck one -- a false
+  // negative, not a measurement.
   const monthName = (day: Date): string => day.toLocaleDateString(undefined, { month: 'long' });
-  const newest = monthName(startOfLocalDay(0));
+  const newest = monthName(startOfLocalDay(MINIMUM_ROWS - 1));
   const separator = grid(phone).getByText(newest, { exact: true }).first();
+  // The grid opens at its end, so the oldest month is scrolled to before it is looked at.
+  await separator.scrollIntoViewIfNeeded();
   await expect(separator, `the grid marks where ${newest} begins`).toBeVisible();
 
-  const label = await labelOf(await rowFor(phone, 0));
+  const label = await labelOf(await rowFor(phone, MINIMUM_ROWS - 1));
 
   expect(
     Number(await styleOf(separator, 'font-weight')),
