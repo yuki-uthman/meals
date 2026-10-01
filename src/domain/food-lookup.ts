@@ -16,6 +16,7 @@ import {
   foodsText,
   slotLabel,
   type FoodPortion,
+  type MealSlot,
 } from './entry';
 import type { MealInstance } from './meal-identity';
 
@@ -335,10 +336,21 @@ export type LookupView =
       readonly results: readonly LookupResult[];
     };
 
-export const lookupView = (history: readonly MealInstance[], query: string): LookupView => {
+/**
+ * The matching meals narrowed to one kind of meal. No slot means no narrowing: the
+ * filter only ever removes meals from what the typed food already found, so the
+ * summary and the list are over the same meals.
+ */
+export const lookupView = (
+  history: readonly MealInstance[],
+  query: string,
+  slot: MealSlot | null = null,
+): LookupView => {
   if (normalise(query) === '') return { kind: 'inviting', message: LOOKUP_INVITATION };
 
-  const meals = matchingMeals(history, query);
+  const meals = matchingMeals(history, query).filter(
+    (meal) => slot === null || meal.slot === slot,
+  );
   if (meals.length === 0) return { kind: 'none', message: NO_LOOKUP_MATCHES };
 
   const portions = matchedPortions(meals, query);

@@ -118,6 +118,7 @@ const start = (): void => {
    */
   let lookupMeals: readonly MealInstance[] | null = null;
   let lookupQuery = '';
+  let lookupSlot: MealSlot | null = null;
   let lookupMessage: string | null = null;
   /**
    * Which way of looking back is open, and what By change is asking: the signed
@@ -467,6 +468,7 @@ const start = (): void => {
         {
           tab: lookupTab,
           query: lookupQuery,
+          slot: lookupSlot,
           target: lookupTarget,
           window: lookupWindow,
           startTarget: lookupStartTarget,
@@ -480,6 +482,12 @@ const start = (): void => {
           // what lets a redraw for any other reason keep what was typed.
           onQuery: (query) => {
             lookupQuery = query;
+          },
+          // A kind of meal is structural: the pill's pressed state and the results both
+          // change, so it redraws -- over meals already in hand.
+          onSlot: (slot) => {
+            lookupSlot = slot;
+            render();
           },
           // The target is recorded and not re-rendered, for exactly the reason the
           // query is: the panel below the field redraws itself.
@@ -980,6 +988,7 @@ const start = (): void => {
     // A fresh search each time the section is opened: coming back to Lookup asks
     // what the person is looking for now, rather than answering an older question.
     lookupQuery = '';
+    lookupSlot = null;
     lookupTab = 'food';
     lookupTarget = '';
     lookupWindow = DEFAULT_CHANGE_WINDOW;
@@ -1607,6 +1616,7 @@ const start = (): void => {
     lookupMeals = null;
     lookupMessage = null;
     lookupQuery = '';
+    lookupSlot = null;
     lookupTab = 'food';
     lookupTarget = '';
     lookupWindow = DEFAULT_CHANGE_WINDOW;
@@ -1692,6 +1702,7 @@ const start = (): void => {
     lookupMeals = null;
     lookupMessage = null;
     lookupQuery = '';
+    lookupSlot = null;
     lookupTab = 'food';
     lookupTarget = '';
     lookupWindow = DEFAULT_CHANGE_WINDOW;

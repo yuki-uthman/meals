@@ -15,6 +15,7 @@ import {
   type ChangeWindow,
   type StartWindow,
 } from '../domain/nearest-lookup';
+import { MEAL_SLOTS, slotLabel, type MealSlot } from '../domain/entry';
 import type { MealInstance } from '../domain/meal-identity';
 
 // Looking back at the log by food: a search box, a summary of the meals that
@@ -90,6 +91,8 @@ export type LookupScreenView = {
   readonly tab: LookupTab;
   /** What is typed in the search box. Held outside, so a redraw keeps it. */
   readonly query: string;
+  /** The kind of meal the matches are narrowed to, or none for every kind. */
+  readonly slot: MealSlot | null;
   /** The target change as typed, signed, and the window it is asked within. */
   readonly target: string;
   readonly window: ChangeWindow;
@@ -107,6 +110,8 @@ export type LookupScreenView = {
 export type LookupHandlers = {
   /** Records what was typed. It does NOT redraw the screen: see below. */
   readonly onQuery: (query: string) => void;
+  /** Choosing a kind of meal, or choosing it again to clear it. Redraws. */
+  readonly onSlot: (slot: MealSlot | null) => void;
   /** Records the target change. It does not redraw the screen either. */
   readonly onTarget: (target: string) => void;
   /** Choosing a tab or a window IS structural, so both redraw. */
@@ -278,11 +283,35 @@ const resultsMessage = (message: string): HTMLElement => {
 const panelFor = (
   meals: readonly MealInstance[],
   query: string,
+  slot: MealSlot | null,
   handlers: LookupHandlers,
 ): readonly HTMLElement[] => {
-  const view = lookupView(meals, query);
+  const view = lookupView(meals, query, slot);
   if (view.kind !== 'found') return [resultsMessage(view.message)];
   return [summarySection(view.summary), resultsSection(view.results, handlers)];
+};
+
+/**
+ * The kinds of meal, as pills under the search box. Tapping the chosen one again
+ * clears it, so there is no separate 'All' to find; none chosen means every kind.
+ */
+const slotPills = (chosen: MealSlot | null, handlers: LookupHandlers): HTMLElement => {
+  const pills = element('div', 'lookup__windows lookup__slots');
+  pills.setAttribute('role', 'group');
+  pills.setAttribute('aria-label', 'Meal type');
+
+  for (const slot of MEAL_SLOTS) {
+    const on = slot === chosen;
+    const pill = document.createElement('button');
+    pill.className = on ? 'lookup__window lookup__window--on' : 'lookup__window';
+    pill.type = 'button';
+    pill.textContent = slotLabel(slot);
+    pill.setAttribute('aria-pressed', String(on));
+    pill.addEventListener('click', () => handlers.onSlot(on ? null : slot));
+    pills.append(pill);
+  }
+
+  return pills;
 };
 
 /** Everything below the target field, for the target and the window in hand. */
@@ -486,11 +515,11 @@ export const lookupScreen = (
   label.textContent = LOOKUP_SEARCH_LABEL;
 
   search.append(label, field);
-  screen.append(search);
+  screen.append(search, slotPills(view.slot, handlers));
 
   const meals = view.state.meals;
   const panel = element('div', 'lookup__panel');
-  panel.append(...panelFor(meals, view.query, handlers));
+  panel.append(...panelFor(meals, view.query, view.slot, handlers));
   screen.append(panel);
 
   /**
@@ -503,7 +532,7 @@ export const lookupScreen = (
   field.addEventListener('input', () => {
     const typed = field.value;
     handlers.onQuery(typed);
-    panel.replaceChildren(...panelFor(meals, typed, handlers));
+    panel.replaceChildren(...panelFor(meals, typed, view.slot, handlers));
   });
 
   return screen;

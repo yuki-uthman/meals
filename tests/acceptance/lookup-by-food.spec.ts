@@ -555,6 +555,34 @@ test('a detail opened from Lookup stays in Lookup, and its edit returns to the s
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
 
+test('the matches can be narrowed to one kind of meal with a pill', async ({ browser }) => {
+  const phone = await openLookup(browser, accounts.owner);
+  await typeQuery(phone, 'rice');
+  await expect(await resultRows(phone)).toHaveCount(4);
+
+  const pill = (name: RegExp): Locator =>
+    phone.getByRole('group', { name: /meal type/i }).getByRole('button', { name });
+
+  // Three of the four rice meals were dinners; the summary narrows with them.
+  await pill(/^dinner$/i).click();
+  await expect(pill(/^dinner$/i)).toHaveAttribute('aria-pressed', 'true');
+  await expect(await resultRows(phone)).toHaveCount(3);
+  expect(await textOf(summary(phone))).toMatch(/\b3 meals\b/);
+  expect(await textOf(results(phone))).not.toMatch(/lunch/i);
+  await expect(searchField(phone), 'the typed food is kept').toHaveValue('rice');
+
+  await pill(/^lunch$/i).click();
+  await expect(await resultRows(phone)).toHaveCount(1);
+
+  // No rice at breakfast, and tapping the chosen pill again clears the filter.
+  await pill(/^breakfast$/i).click();
+  await expect(results(phone).getByText(NO_MATCHES)).toBeVisible();
+  await pill(/^breakfast$/i).click();
+  await expect(await resultRows(phone)).toHaveCount(4);
+
+  expect(await scrollsHorizontally(phone), 'the pills fit 360 px').toBe(false);
+});
+
 test('a food never eaten has no summary and says so', async ({ browser }) => {
   const phone = await openLookup(browser, accounts.owner);
 
