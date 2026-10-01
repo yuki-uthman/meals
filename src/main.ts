@@ -24,6 +24,7 @@ import {
 } from './domain/entry';
 import {
   historyDates,
+  historyFoodNames,
   historyRows,
   HISTORY_RECORD_START,
   type HistoryView,
@@ -424,7 +425,11 @@ const start = (): void => {
     // How far back the grid runs is read off the record itself: today back to the
     // earliest entry, with the floor so a short log still reads as a grid.
     const dates = historyDates(historyToday, historyWindow);
-    return { kind: 'loaded', rows: historyRows(historyWindow, dates, historyView) };
+    return {
+      kind: 'loaded',
+      rows: historyRows(historyWindow, dates, historyView),
+      foods: historyFoodNames(historyWindow),
+    };
   };
 
   const historySection = (): HTMLElement =>

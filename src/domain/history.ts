@@ -461,34 +461,61 @@ export const cellHasFood = (cell: HistoryCell, query: string): boolean => {
 };
 
 /**
- * The grid narrowed to one food. Only the days with a meal holding that food are
- * kept, and within them every cell that does not hold it is greyed out, so the
- * matching meals stand out against the rest of their day. The month separators
- * are worked out again over the rows that are left, so a month whose first days
- * were dropped is still named. An empty query leaves the grid as it was.
+ * The grid with one food picked out. Nothing is added, moved or taken away: every
+ * day keeps its row and every row its four cells, and the cells that do not hold
+ * that food are greyed out, so the meals that do are what the eye lands on. An
+ * empty query greys out nothing.
  */
 export const searchHistoryRows = (
   rows: readonly HistoryRow[],
   query: string,
 ): readonly HistoryRow[] => {
   if (normaliseFood(query) === '') return rows;
-  let previousMonth: string | null = null;
-  return rows
-    .filter((row) => row.cells.some((cell) => cellHasFood(cell, query)))
-    .map((row): HistoryRow => {
-      const month = historyMonthLabel(row.date);
-      const monthLabel = month === previousMonth ? null : month;
-      previousMonth = month;
-      return {
-        ...row,
-        monthLabel,
-        cells: row.cells.map((cell) => ({ ...cell, dimmed: !cellHasFood(cell, query) })),
-      };
-    });
+  return rows.map(
+    (row): HistoryRow => ({
+      ...row,
+      cells: row.cells.map((cell) => ({ ...cell, dimmed: !cellHasFood(cell, query) })),
+    }),
+  );
 };
 
-/** What the grid says when no day holds the food being searched for. */
-export const noFoodMatches = (query: string): string => `No meals with “${query.trim()}”.`;
+/** How many foods the search field offers at once: a short list, which typing narrows. */
+export const FOOD_SUGGESTION_LIMIT = 8;
+
+/**
+ * Every food the record holds, once each and most recently eaten first. These are
+ * the foods a search can find, so they are what the field offers; a food differing
+ * only in case or spacing is one food and is offered under its latest spelling.
+ */
+export const historyFoodNames = (window: HistoryWindow): readonly string[] => {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  const newestFirst = [...window.meals].sort((a, b) => b.eatenAt.getTime() - a.eatenAt.getTime());
+  for (const meal of newestFirst) {
+    for (const food of meal.foods) {
+      const key = normaliseFood(food);
+      if (key === '' || seen.has(key)) continue;
+      seen.add(key);
+      names.push(food.trim());
+    }
+  }
+  return names;
+};
+
+/**
+ * The foods to offer beneath the field: those whose name contains what was typed.
+ * Nothing is offered before anything is typed, nor once what is typed IS the one
+ * food left, because a list repeating the field back adds nothing.
+ */
+export const suggestedFoods = (names: readonly string[], typed: string): readonly string[] => {
+  const wanted = normaliseFood(typed);
+  if (wanted === '') return [];
+  const matches = names
+    .filter((name) => normaliseFood(name).includes(wanted))
+    .slice(0, FOOD_SUGGESTION_LIMIT);
+  if (matches.length === 1 && normaliseFood(matches[0] ?? '') === wanted) return [];
+  return matches;
+};
 
 export const HISTORY_SEARCH_LABEL = 'Search history by food';
 

@@ -26,8 +26,8 @@ shows is one you recorded before.
   most recent entry with the same foods, slot and dose. It says why when there is none.
 - **History** — one row per day, columns for the night and the three meal slots, in a
   Before, Change or Both view. Before is coloured by the level of the reading; Change
-  and Both by the change. A food search narrows the grid to the days with a meal
-  holding that food and greys out every other cell in them.
+  and Both by the change. A food search, offering the foods you have eaten as you
+  type, greys out every cell that does not hold that food and leaves the grid as it is.
 - **Lookup** — by food, by target change, or by starting reading.
 
 ## Setting it up
