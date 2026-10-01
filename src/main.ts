@@ -46,6 +46,7 @@ import {
   NO_FOOD_NAME_REFUSAL,
   repeatMealDraft,
   withFood,
+  withFoodAt,
   withoutFood,
   type FoodDraft,
   type MealDraft,
@@ -61,7 +62,12 @@ import {
 } from './domain/night';
 import type { Account, Credentials } from './ports/identity';
 import { dayLogSection, type DayLogState } from './ui/day-log';
-import { FOOD_FORM_TITLE, foodForm, type NameState } from './ui/food-form';
+import {
+  EDIT_FOOD_FORM_TITLE,
+  FOOD_FORM_TITLE,
+  foodForm,
+  type NameState,
+} from './ui/food-form';
 import {
   BACK_TO_HISTORY_LABEL,
   BACK_TO_LOOKUP_LABEL,
@@ -227,6 +233,11 @@ const start = (): void => {
   let mealDraft: MealDraft | null = null;
   let foodDraft: FoodDraft | null = null;
   /**
+   * Where in the meal's list the food on the food screen sits, when it was reopened
+   * from that list to be changed; null when it is a new food being added.
+   */
+  let foodIndex: number | null = null;
+  /**
    * The signed-in account's own foods, read before the Add food screen is shown and
    * re-read every time it is: what is offered must be what the store holds, never
    * what an abandoned screen was holding. Held here rather than in the screen for
@@ -352,6 +363,7 @@ const start = (): void => {
           onExerciseContext: (exerciseContext: ExerciseContext) => patchMeal({ exerciseContext }),
           onNote: (note) => patchMeal({ note }),
           onAddFood: () => void openFoodForm(),
+          onEditFood: (index) => void openEditFood(index),
           onRemoveFood: (index) => removeFood(index),
         },
       ),
@@ -359,7 +371,11 @@ const start = (): void => {
 
   const foodScreen = (draft: FoodDraft): HTMLElement =>
     shell(
-      { date, isToday: date === localToday(), form: { title: FOOD_FORM_TITLE, busy: false } },
+      {
+        date,
+        isToday: date === localToday(),
+        form: { title: foodIndex === null ? FOOD_FORM_TITLE : EDIT_FOOD_FORM_TITLE, busy: false },
+      },
       { ...dayHandlers, onCancel: () => backToMeal(), onSave: () => void keepFood() },
       foodForm(
         { draft, message: formMessage, catalogue, name: foodNameState },
@@ -686,6 +702,7 @@ const start = (): void => {
     clearDetail();
     mealDraft = null;
     foodDraft = null;
+    foodIndex = null;
     // What the name field was belongs to the Add food screen being left.
     foodNameState = TYPED_NAME;
     nightDraft = null;
@@ -790,6 +807,7 @@ const start = (): void => {
         if (foodDraft === null) {
           if (!(await loadFoodCatalogue())) return;
           foodDraft = emptyFoodDraft;
+          foodIndex = null;
           foodNameState = TYPED_NAME;
         }
         formMessage = null;
@@ -1360,7 +1378,27 @@ const start = (): void => {
   const openFoodForm = async (): Promise<void> => {
     if (!(await loadFoodCatalogue())) return;
     foodDraft = emptyFoodDraft;
+    foodIndex = null;
     foodNameState = TYPED_NAME;
+    formMessage = null;
+    screen = 'food';
+    render();
+  };
+
+  /**
+   * A food already in the meal, reopened on the same screen to change its amount,
+   * its unit or the food itself. It opens as what was recorded: a food the catalogue
+   * holds opens chosen, so its type is stated rather than asked again, and handing
+   * it back replaces it in its place in the list rather than adding a second one.
+   */
+  const openEditFood = async (index: number): Promise<void> => {
+    const food = mealDraft?.foods[index];
+    if (food === undefined) return;
+    if (!(await loadFoodCatalogue())) return;
+    const owned = ownedFood(catalogue, food.name);
+    foodDraft = owned === null ? food : { ...food, name: owned.name, foodType: owned.foodType };
+    foodIndex = index;
+    foodNameState = owned === null ? TYPED_NAME : { kind: 'chosen', food: owned };
     formMessage = null;
     screen = 'food';
     render();
@@ -1400,7 +1438,9 @@ const start = (): void => {
    */
   const addFoodToMeal = (food: CatalogueFood, draft: FoodDraft): void => {
     if (mealDraft === null) return;
-    mealDraft = withFood(mealDraft, { ...draft, name: food.name, foodType: food.foodType });
+    const kept = { ...draft, name: food.name, foodType: food.foodType };
+    mealDraft =
+      foodIndex === null ? withFood(mealDraft, kept) : withFoodAt(mealDraft, foodIndex, kept);
     backToMeal();
   };
 

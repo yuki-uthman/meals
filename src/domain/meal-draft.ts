@@ -163,7 +163,13 @@ export const withFood = (draft: MealDraft, food: FoodDraft): MealDraft => ({
   foods: [...draft.foods, food],
 });
 
-export const withoutFood = (draft: MealDraft, index: number): MealDraft => ({
+/** The food at this position replaced, keeping its place in the list. */
+export const withFoodAt = (draft: MealDraft, index: number, food: FoodDraft): MealDraft => ({
+  ...draft,
+  foods: draft.foods.map((existing, at) => (at === index ? food : existing)),
+});
+
+export const withoutFood =(draft: MealDraft, index: number): MealDraft => ({
   ...draft,
   foods: draft.foods.filter((_, at) => at !== index),
 });

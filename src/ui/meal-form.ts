@@ -240,6 +240,7 @@ export type MealFormHandlers = {
   readonly onExerciseContext: (context: ExerciseContext) => void;
   readonly onNote: (value: string) => void;
   readonly onAddFood: () => void;
+  readonly onEditFood: (index: number) => void;
   readonly onRemoveFood: (index: number) => void;
 };
 
@@ -271,19 +272,26 @@ const foodMeasure = (food: FoodDraft): string =>
  * One food as the meal screen reads it back: its name, its type and its amount.
  * The type is shown because it is part of the recording, so reopening a meal
  * cannot quietly lose what a food was classified as.
+ *
+ * The food itself is the way to change it: tapping it reopens it on the food screen
+ * with its name, amount and unit filled in, so a portion entered wrong is corrected
+ * in place rather than removed and added again.
  */
 const foodRow = (
   food: FoodDraft,
   index: number,
+  onEdit: (index: number) => void,
   onRemove: (index: number) => void,
 ): HTMLElement => {
   const row = document.createElement('li');
   row.className = 'food-list__row';
 
-  const text = document.createElement('span');
+  const text = document.createElement('button');
   text.className = 'food-list__text';
+  text.type = 'button';
   const type = food.foodType === null ? '' : ` · ${foodTypeLabel(food.foodType)}`;
   text.textContent = `${food.name}${type}${foodMeasure(food)}`;
+  text.addEventListener('click', () => onEdit(index));
 
   const remove = document.createElement('button');
   remove.className = 'button button--quiet';
@@ -309,7 +317,7 @@ const foodList = (state: MealFormState, handlers: MealFormHandlers): HTMLElement
     const list = document.createElement('ul');
     list.className = 'food-list__rows';
     state.draft.foods.forEach((food, index) => {
-      list.append(foodRow(food, index, handlers.onRemoveFood));
+      list.append(foodRow(food, index, handlers.onEditFood, handlers.onRemoveFood));
     });
     section.append(list);
   }

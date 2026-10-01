@@ -346,3 +346,57 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
+
+test('a food already in the meal is tapped to change its amount, its unit or the food itself', async ({
+  browser,
+}) => {
+  const phone = await openPhone(browser);
+  await signIn(phone, accounts.owner);
+
+  await logFromEmptyCard(phone, 'Lunch');
+  await phone.getByLabel('Time', { exact: true }).fill('12:30');
+  await addFood(phone, { name: 'Toast', type: 'Carb-heavy', amount: '2', unit: 'pc' });
+  await addFood(phone, { name: 'Butter', type: 'Dairy', amount: '10', unit: 'g' });
+
+  // --- Changing the portion ------------------------------------------------
+
+  // The food itself is the control: there is no separate Edit button beside it.
+  await expect(phone.getByRole('button', { name: /^edit toast$/i })).toHaveCount(0);
+  await phone.getByRole('button', { name: /^Toast ·/ }).click();
+
+  await expect(phone.getByRole('heading', { name: /^edit food$/i })).toBeVisible();
+  // It opens as recorded, and as the catalogue's food: its type is stated, not asked.
+  await expect(phone.getByLabel('Food name', { exact: true })).toHaveValue('Toast');
+  await expect(phone.getByLabel('Amount', { exact: true })).toHaveValue('2');
+  await expect(phone.getByRole('group', { name: /^type$/i })).toHaveCount(0);
+
+  await phone.getByLabel('Amount', { exact: true }).fill('60');
+  await chooseOption(phone, 'g');
+  await save(phone);
+
+  await expect(phone.getByRole('heading', { name: /^edit meal$|^new meal$/i })).toBeVisible();
+  const foods = phone.locator('.food-list__rows');
+  await expect(foods.getByRole('listitem'), 'changed in place, not added again').toHaveCount(2);
+  await expect(foods.getByRole('listitem').first()).toContainText('Toast');
+  await expect(foods.getByRole('listitem').first()).toContainText('60 g');
+
+  // --- Changing the food ---------------------------------------------------
+
+  await phone.getByRole('button', { name: /^Butter ·/ }).click();
+  await phone.getByLabel('Food name', { exact: true }).fill('Cucumber');
+  await phone.getByRole('button', { name: /^Cucumber salad ·/ }).click();
+  await phone.getByLabel('Amount', { exact: true }).fill('80');
+  await save(phone);
+
+  await expect(foods.getByRole('listitem')).toHaveCount(2);
+  await expect(foods.getByRole('listitem').nth(1)).toContainText('Cucumber salad');
+  await expect(foods.getByRole('listitem').nth(1)).toContainText('80 g');
+  await expect(phone.locator('.food-list__rows')).not.toContainText('Butter');
+
+  await save(phone);
+
+  const lunch = await card(phone, 'Lunch');
+  expect(await textOf(lunch)).toContain('Toast 60 g · Cucumber salad 80 g');
+
+  expect(await scrollsHorizontally(phone)).toBe(false);
+});
