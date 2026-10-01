@@ -1058,7 +1058,7 @@ test('the grid opens on Before: one row per day, four chronological columns, col
 
   // The columns, left to right: the day's meals, then the night half that is being shown.
   const gridText = await textOf(grid(phone));
-  expect(gridText, "Before names the night column 'Bedtime'").toMatch(/bedtime/i);
+  expect(gridText, "Every view names the night column 'Night'").toMatch(/night/i);
   expect(gridText, 'the meal columns are named').toMatch(/breakfast/i);
   expect(gridText).toMatch(/lunch/i);
   expect(gridText).toMatch(/dinner/i);
@@ -1069,9 +1069,9 @@ test('the grid opens on Before: one row per day, four chronological columns, col
     'Breakfast',
     'Lunch',
     'Dinner',
-    'Bedtime',
+    'Night',
   ]);
-  // In every view, every header fits its column at 360 px -- 'Overnight' is as long as
+  // In every view, every header fits its column at 360 px -- 'Night' is shorter than
   // 'Breakfast' -- and the night's is drawn exactly as the meals' are, not smaller.
   for (const view of ['change', 'both', 'before'] as const) {
     await phone.getByRole('button', { name: new RegExp(`^${view}$`, 'i') }).click();
@@ -1136,12 +1136,12 @@ test('Change shows the signed change and Both shows the two readings, each colou
 
     // The header of the night column says which half is being shown. Read as the words the
     // page holds rather than as drawn, since every header is drawn in upper case; and matched
-    // whole, so 'Overnight' cannot satisfy the Both view's 'Night'.
+    // whole. It reads 'Night' in every view.
     const headerWords = (await grid(phone).getByRole('columnheader').allTextContents()).map(
       (text) => text.trim(),
     );
     expect(headerWords, `the ${view} view names its night column`).toContain(
-      view === 'change' ? 'Overnight' : 'Night',
+      'Night',
     );
 
     await expect(phone.getByText(CHANGE_CAPTION)).toBeVisible();

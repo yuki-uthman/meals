@@ -179,7 +179,7 @@ const gridTable = (rows: readonly HistoryRow[], view: HistoryView, handlers: His
   headRow.append(corner);
   // Every header, the night's included, is drawn the same way: upper case, bold,
   // letter-spaced. A transform changes only how a word is drawn, never the text a
-  // reader or an oracle reads back, so 'Night' and 'Overnight' stay distinct.
+  // reader or an oracle reads back.
   historyHeaders(view).forEach((header) => {
     const cell = element('th', 'history__header', header);
     cell.setAttribute('scope', 'col');

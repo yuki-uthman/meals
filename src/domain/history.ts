@@ -63,17 +63,8 @@ export const CHANGE_CAPTION = 'Colour is the change, not the level. Tap a cell t
 export const historyCaption = (view: HistoryView): string =>
   view === 'before' ? LEVEL_CAPTION : CHANGE_CAPTION;
 
-/**
- * The night column's header follows the view: it is a bedtime-and-morning pair,
- * and the header says which half is being shown.
- */
-const NIGHT_HEADERS: Readonly<Record<HistoryView, string>> = {
-  before: 'Bedtime',
-  change: 'Overnight',
-  both: 'Night',
-};
-
-export const nightColumnHeader = (view: HistoryView): string => NIGHT_HEADERS[view];
+/** The night column reads 'Night' in every view, so the header never shifts under the pills. */
+export const nightColumnHeader = (_view: HistoryView): string => 'Night';
 
 /** The three meal columns, in the order the grid shows them. */
 export const HISTORY_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner'];
