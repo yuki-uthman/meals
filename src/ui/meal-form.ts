@@ -450,6 +450,15 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
       onSlot,
     ),
     timeField('meal-time', draft.time, handlers.onTime),
+    // The dose sits above the readings it relates to.
+    numberField(
+      'meal-insulin-units',
+      'Rapid-acting units',
+      'dose',
+      draft.insulinUnits,
+      onInsulinUnits,
+      { stepper: true },
+    ),
     // The two readings side by side: they are read as a pair, and the after is
     // what an edit most often comes back to add. Exercise and the note matter
     // less, so they sit last.
@@ -473,14 +482,6 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
     // about -- and it only ever reports beside it, never into it.
     ...(hasFoods ? [panel] : []),
     foodList(state, handlers),
-    numberField(
-      'meal-insulin-units',
-      'Rapid-acting units',
-      'dose',
-      draft.insulinUnits,
-      onInsulinUnits,
-      { stepper: true },
-    ),
     choiceGroup<ExerciseContext>(
       'meal-exercise',
       'Exercise',
