@@ -348,8 +348,16 @@ const searchField = (
   });
   field.addEventListener('focus', () => offer(field.value));
   field.addEventListener('blur', close);
+  // Enter keeps what was typed as the search -- a keyword such as a restaurant's
+  // name, which greys out every food not carrying it -- and puts the list away,
+  // along with a phone's keyboard, so the grid it greys can be seen.
   field.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') close();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      close();
+      field.blur();
+    }
   });
 
   box.append(label, field, list);

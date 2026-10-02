@@ -23,6 +23,8 @@ import { createAccounts, removeAccounts, type SeededAccounts } from '../support/
  *  - As a food is typed, the foods the record holds whose names contain it are offered in a
  *    list, most recently eaten first; choosing one searches for it and closes the list. The
  *    list floats over the grid rather than pushing it down.
+ *  - Enter puts the list away and keeps what was typed as the search, so a keyword -- a
+ *    restaurant's name -- greys out every food that does not carry it.
  *  - A greyed cell is still a control, and opens what it opened before.
  *  - Typing redraws the grid and not the field: the caret stays where it was.
  *  - A food no day holds greys out every cell and offers nothing.
@@ -93,6 +95,10 @@ const seedMeals: readonly SeedMeal[] = [
   { daysAgo: 2, slot: 'dinner', hour: 19, before: 95, foods: ['Soup', 'Fried rice'] },
   { daysAgo: NO_RICE_DAY, slot: 'breakfast', hour: 8, before: 140, foods: ['Porridge'] },
   { daysAgo: 40, slot: 'lunch', hour: 12, before: 100, foods: ['Rice ball'] },
+  // Two foods from one restaurant, which carry its name: searching for the name is how
+  // every meal eaten there is picked out.
+  { daysAgo: 5, slot: 'dinner', hour: 19, before: 130, foods: ['Wagamama ramen'] },
+  { daysAgo: 6, slot: 'lunch', hour: 12, before: 125, foods: ['Wagamama gyoza', 'Tea'] },
 ];
 
 const NIGHT_DAYS_AGO = 1;
@@ -347,6 +353,25 @@ test('typing offers the foods the record holds, and choosing one searches for it
   await expectDimmed(cellsOf(page, 2).nth(DINNER), false, 'the fried rice dinner');
   await expectDimmed(cellsOf(page, 1).nth(LUNCH), true, 'the chicken rice lunch');
   await expectDimmed(cellsOf(page, 40).nth(LUNCH), true, 'the rice ball lunch');
+});
+
+test('Enter puts the list away and searches by the keyword typed', async ({ page }) => {
+  await openHistory(page);
+  const cellCount = await grid(page).getByRole('button').count();
+  const field = searchField(page);
+  await field.click();
+  await field.pressSequentially('wagamama');
+  await expect(suggestions(page)).toHaveText(['Wagamama ramen', 'Wagamama gyoza']);
+
+  await field.press('Enter');
+  await expect(suggestions(page), 'Enter puts the list away').toHaveCount(0);
+  await expect(field, 'what was typed stays the search').toHaveValue('wagamama');
+  await expect(field, 'the field lets go, and a phone its keyboard').not.toBeFocused();
+
+  await expectDimmed(cellsOf(page, 5).nth(DINNER), false, 'the ramen dinner');
+  await expectDimmed(cellsOf(page, 6).nth(LUNCH), false, 'the gyoza lunch');
+  await expectDimmed(cellsOf(page, 1).nth(LUNCH), true, 'the chicken rice lunch');
+  await expect(grid(page).locator('[data-dimmed]')).toHaveCount(cellCount - 2);
 });
 
 test('a greyed cell still opens what it opened before', async ({ page }) => {
