@@ -42,6 +42,7 @@
   --accent-wash: #e4efec;
 
   --danger: #b42318;
+  --danger-wash: #fbeae8;
 
   /* Band colours from the canvas. They are deliberately the same in both
      palettes, so the two themes read identically: a band is a statement about
@@ -76,6 +77,7 @@
     --accent-wash: #1e2e2b;
 
     --danger: #e88c82;
+    --danger-wash: #3a2421;
     /* No band token is overridden here, on purpose: the canvas keeps the band
        colours unchanged between light and dark so the two themes read the same.
        A band states what happened, and it must not change its mind in the dark. */
@@ -858,7 +860,7 @@ label {
 
 /* The food is itself the control that reopens it. It fills the row up to Remove,
    so the whole card is the target rather than just the letters, and it says it
-   opens with a chevron instead of looking like a button.
+   says nothing of being a button: the row's press is what answers a tap.
 
    A tap answers the way a native list does: the row darkens while it is held. The
    browser's own tap flash -- a translucent box drawn over the button's bounds --
@@ -887,18 +889,6 @@ label {
   transition: background-color 120ms ease-out;
 }
 
-.food-list__text::after {
-  content: '';
-  flex: none;
-  width: 0.45rem;
-  height: 0.45rem;
-  margin-left: auto;
-  border-top: 2px solid var(--ink-muted);
-  border-right: 2px solid var(--ink-muted);
-  transform: rotate(45deg);
-  opacity: 0.7;
-}
-
 .food-list__text:active {
   background: var(--wash);
   transition: none;
@@ -916,11 +906,51 @@ label {
   border-radius: var(--radius);
 }
 
-.food-list__row > .button {
+/* Pressing the food presses the whole card, the x's corner included. */
+.food-list__text:active + .food-list__remove {
+  background: var(--wash);
+}
+
+/* Removing a food is the one destructive act on the row, so it is an x in the
+   theme's own danger red rather than a word in the accent: small, unmistakable,
+   and the same red the screen uses for a refusal. It keeps a full-height,
+   thumb-sized target even though the mark itself is small. */
+.food-list__remove {
   flex: none;
-  align-self: center;
-  margin-right: var(--space-1);
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--danger);
+  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color 120ms ease-out;
+}
+
+.food-list__remove svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.food-list__remove:active {
+  background: var(--danger-wash);
+  transition: none;
+}
+
+@media (hover: hover) {
+  .food-list__remove:hover {
+    background: var(--danger-wash);
+  }
+}
+
+.food-list__remove:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+  border-radius: var(--radius);
 }
 
 /* ------------------------------------------------------- the night screen */

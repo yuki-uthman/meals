@@ -293,11 +293,15 @@ const foodRow = (
   text.textContent = `${food.name}${type}${foodMeasure(food)}`;
   text.addEventListener('click', () => onEdit(index));
 
+  // An x rather than a word: the label stays on it for anyone who cannot see it.
   const remove = document.createElement('button');
-  remove.className = 'button button--quiet';
+  remove.className = 'food-list__remove';
   remove.type = 'button';
   remove.setAttribute('aria-label', `Remove ${food.name}`);
-  remove.textContent = 'Remove';
+  remove.innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.25" stroke-linecap="round"/></svg>';
   remove.addEventListener('click', () => onRemove(index));
 
   row.append(text, remove);
