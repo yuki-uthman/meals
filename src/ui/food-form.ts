@@ -25,6 +25,8 @@ import { choiceGroup, formScreen, notice, numberField, textField } from './meal-
 // food: choosing a food answers it, and only creating a new one asks it.
 
 export const FOOD_FORM_TITLE = 'Add food';
+/** The same screen, reopened on a food already in the meal to change it. */
+export const EDIT_FOOD_FORM_TITLE = 'Edit food';
 
 /**
  * What the name field currently is. `typed` is a name still being worked out;
