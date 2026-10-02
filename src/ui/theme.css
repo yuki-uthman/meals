@@ -43,6 +43,7 @@
 
   --danger: #b42318;
   --danger-wash: #fbeae8;
+  --danger-press: #f5d3cf;
 
   /* Band colours from the canvas. They are deliberately the same in both
      palettes, so the two themes read identically: a band is a statement about
@@ -78,6 +79,7 @@
 
     --danger: #e88c82;
     --danger-wash: #3a2421;
+    --danger-press: #4f2f2a;
     /* No band token is overridden here, on purpose: the canvas keeps the band
        colours unchanged between light and dark so the two themes read the same.
        A band states what happened, and it must not change its mind in the dark. */
@@ -912,14 +914,15 @@ label {
 }
 
 /* Removing a food is the one destructive act on the row, so it is an x in the
-   theme's own danger red rather than a word in the accent: small, unmistakable,
-   and the same red the screen uses for a refusal. It keeps a full-height,
-   thumb-sized target even though the mark itself is small. */
+   theme's own danger red rather than a word in the accent: a small round button,
+   tinted with the same red the screen uses for a refusal. The circle is drawn on
+   the icon, so the button around it can stay a full-height, thumb-sized target
+   without the press ever showing as a square. */
 .food-list__remove {
   flex: none;
   display: grid;
   place-items: center;
-  width: 2.75rem;
+  width: 3rem;
   min-height: 2.75rem;
   margin: 0;
   padding: 0;
@@ -928,29 +931,37 @@ label {
   color: var(--danger);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background-color 120ms ease-out;
 }
 
 .food-list__remove svg {
-  width: 1.125rem;
-  height: 1.125rem;
+  box-sizing: border-box;
+  width: 2rem;
+  height: 2rem;
+  padding: 0.5rem;
+  border-radius: 50%;
+  background: var(--danger-wash);
+  transition: background-color 120ms ease-out, transform 120ms ease-out;
 }
 
-.food-list__remove:active {
-  background: var(--danger-wash);
+.food-list__remove:active svg {
+  background: var(--danger-press);
+  transform: scale(0.92);
   transition: none;
 }
 
 @media (hover: hover) {
-  .food-list__remove:hover {
-    background: var(--danger-wash);
+  .food-list__remove:hover svg {
+    background: var(--danger-press);
   }
 }
 
 .food-list__remove:focus-visible {
+  outline: none;
+}
+
+.food-list__remove:focus-visible svg {
   outline: 2px solid var(--danger);
-  outline-offset: -2px;
-  border-radius: var(--radius);
+  outline-offset: 2px;
 }
 
 /* ------------------------------------------------------- the night screen */
