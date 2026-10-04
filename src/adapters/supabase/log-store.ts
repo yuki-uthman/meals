@@ -196,8 +196,9 @@ const rowIds = (rows: unknown): string[] =>
 /**
  * A new meal and its foods, written together. PostgREST has no transaction
  * across two requests, so the meal row is created first and removed again if its
- * foods do not land: a meal with no foods is not a thing this product can
- * compare, and a half-written one would quietly corrupt every later lookup.
+ * foods do not land: a half-written meal would quietly corrupt every later
+ * lookup. A meal recorded with no foods yet -- the reading now, the foods later --
+ * has nothing to write after its row.
  */
 const recordNewMeal = async (
   client: SupabaseClient,
@@ -207,6 +208,7 @@ const recordNewMeal = async (
   if (created.error !== null) return toSaveFailure(created.error, created.status);
 
   const id = String((created.data as { id?: unknown }).id);
+  if (recording.foods.length === 0) return { kind: 'saved', id };
 
   const foods = await client.from('meal_foods').insert(foodRows(id, recording.foods));
   if (foods.error !== null) {
@@ -235,8 +237,10 @@ const updateMeal = async (
   const existing = await client.from('meal_foods').select('id').eq('meal_id', id);
   if (existing.error !== null) return toSaveFailure(existing.error, existing.status);
 
-  const inserted = await client.from('meal_foods').insert(foodRows(id, recording.foods));
-  if (inserted.error !== null) return { kind: 'refused', message: MEAL_NOT_SAVED };
+  if (recording.foods.length > 0) {
+    const inserted = await client.from('meal_foods').insert(foodRows(id, recording.foods));
+    if (inserted.error !== null) return { kind: 'refused', message: MEAL_NOT_SAVED };
+  }
 
   const previous = rowIds(existing.data);
   if (previous.length > 0) {

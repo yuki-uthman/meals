@@ -185,14 +185,23 @@ export type EmptyCell = {
 };
 
 /**
- * An entry IS recorded, but it has no reading to show in this view: a meal saved
+ * An entry IS recorded, but it has no complete reading for this view: a meal saved
  * without its readings, or one still waiting for its after reading. It must not
  * look like a slot with nothing in it, because it is the cell somebody comes back
  * to later to put the readings in. It opens that entry, never a second one.
+ *
+ * Whatever half of the pair IS recorded is still shown, unbanded: a before reading
+ * taken and an after reading not yet due reads '112' over a dash rather than a dash
+ * alone, so the grid shows what is known. No band, because a change needs both.
  */
 export type AwaitingCell = {
   readonly kind: 'awaiting';
-  /** Its day and its column, and that it is recorded with no reading yet. */
+  /**
+   * The pair as far as it is recorded, a dash standing in for the missing half,
+   * or empty when neither half is recorded.
+   */
+  readonly readings: readonly string[];
+  /** Its day and its column, what is recorded, and that a reading is still to come. */
   readonly name: string;
   readonly target: CellTarget;
   /** The names of the foods behind it; none for a night or an empty slot. */
@@ -288,19 +297,48 @@ const empty = (label: string, column: string, target: CellTarget): EmptyCell => 
   dimmed: false,
 });
 
-/** Recorded, and waiting for the reading this view would show. */
+/** What the two halves of a pair are called when a cell is said in words. */
+type PairWords = readonly [first: string, second: string];
+
+const MEAL_PAIR: PairWords = ['before', 'after'];
+const NIGHT_PAIR: PairWords = ['bedtime', 'morning'];
+
+const MISSING_READING = '—';
+
+/**
+ * Recorded, and waiting for the reading this view would show. Whichever half of
+ * the pair is in hand is kept, so a cell with only its before reading shows it.
+ */
 const awaiting = (
   label: string,
   column: string,
   target: CellTarget,
   foods: readonly string[],
-): AwaitingCell => ({
-  kind: 'awaiting',
-  name: `${label} ${column} recorded, no reading yet`,
-  target,
-  foods,
-  dimmed: false,
-});
+  pair: readonly [number | null, number | null] = [null, null],
+  words: PairWords = MEAL_PAIR,
+): AwaitingCell => {
+  const [first, second] = pair;
+  if (first === null && second === null) {
+    return {
+      kind: 'awaiting',
+      readings: [],
+      name: `${label} ${column} recorded, no reading yet`,
+      target,
+      foods,
+      dimmed: false,
+    };
+  }
+  const said = (value: number | null, word: string): string =>
+    value === null ? `${word} no reading yet` : `${word} ${reading(value)}`;
+  return {
+    kind: 'awaiting',
+    readings: [first, second].map((value) => (value === null ? MISSING_READING : reading(value))),
+    name: `${label} ${column} ${said(first, words[0])}, ${said(second, words[1])}`,
+    target,
+    foods,
+    dimmed: false,
+  };
+};
 
 const byTimeAscending = (a: RecentMeal, b: RecentMeal): number =>
   a.eatenAt.getTime() - b.eatenAt.getTime();
@@ -349,9 +387,12 @@ const mealCell = (
     };
   }
 
-  // No after reading means no change exists, so Change and Both are empty. A
+  // No after reading means no change exists, so Change and Both carry no band.
+  // What IS recorded is still shown, beside a dash for the half still to come; a
   // missing measurement is never drawn as a change of zero.
-  if (before === null || after === null) return nothingToShow();
+  if (before === null || after === null) {
+    return awaiting(label, column, target, meal.foods, [before, after], MEAL_PAIR);
+  }
   const change = after - before;
   const readings = view === 'change' ? [changeText(change)] : [reading(before), reading(after)];
   return {
@@ -404,7 +445,9 @@ const nightCell = (
   // NEXT day's breakfast. Until that is recorded the night is awaiting it, never a
   // change of zero.
   const morning = morningReading(window.meals, shiftDate(date, 1));
-  if (bedtime === null || morning === null) return nothingToShow();
+  if (bedtime === null || morning === null) {
+    return awaiting(label, column, target, [], [bedtime, morning], NIGHT_PAIR);
+  }
   const change = morning - bedtime;
   const readings = view === 'change' ? [changeText(change)] : [reading(bedtime), reading(morning)];
   return {

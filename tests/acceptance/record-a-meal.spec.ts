@@ -43,7 +43,6 @@ const PHONE_VIEWPORT = { width: 360, height: 780 } as const;
 const EMAIL_PREFIX = 'record-a-meal';
 
 const NOT_LOGGED_YET = 'Not logged yet';
-const NO_FOOD_REFUSAL = 'Add at least one food.';
 
 let stack: LocalStack;
 let accounts: SeededAccounts;
@@ -319,30 +318,29 @@ test('a meal is recorded from an empty slot, shows on Today, and reopens to take
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 
-  // --- A meal with no food is refused, in place, writing nothing -----------
+  // --- A meal with no food yet is recorded: the reading now, the foods later ---
 
   await logFromEmptyCard(phone, 'Breakfast');
+  await phone.getByLabel('Time', { exact: true }).fill('07:45');
+  await phone.getByLabel('Glucose before', { exact: true }).fill('98');
   await save(phone);
 
-  await expect(phone.getByText(NO_FOOD_REFUSAL)).toBeVisible();
-
-  // Refused in place: the form is still on screen with its fields, so nothing the
-  // person typed was thrown away by the refusal.
-  await expect(phone.getByLabel('Glucose before', { exact: true })).toBeVisible();
-  await expect(phone.getByLabel('Time', { exact: true })).toBeVisible();
-
-  await phone.getByRole('button', { name: /^cancel$/i }).click();
-
-  // Today gains no card: the refusal wrote nothing at all.
-  expect(await textOf(await card(phone, 'Breakfast'))).toContain(NOT_LOGGED_YET);
+  // Saved, not refused: sometimes the reading is all there is to record yet, and the
+  // foods are added when there is time.
+  const breakfast = await card(phone, 'Breakfast');
+  const breakfastText = await textOf(breakfast);
+  expect(breakfastText, 'the breakfast is logged').not.toContain(NOT_LOGGED_YET);
+  for (const fragment of ['07:45', '98']) {
+    expect(breakfastText, `the Breakfast card must read ${fragment}`).toContain(fragment);
+  }
   expect(await textOf(await card(phone, 'Lunch'))).toContain(NOT_LOGGED_YET);
   expect(await textOf(await card(phone, 'Dinner'))).toContain('Chicken rice 250 g');
 
   // And the store agrees, not just the screen: a reload re-reads the date and finds
-  // exactly one dinner and no breakfast.
+  // exactly one dinner and the food-less breakfast.
   await phone.reload();
   expect(await textOf(await card(phone, 'Dinner'))).toContain('Chicken rice 250 g · Cucumber salad 80 g');
-  expect(await textOf(await card(phone, 'Breakfast'))).toContain(NOT_LOGGED_YET);
+  expect(await textOf(await card(phone, 'Breakfast'))).toContain('98');
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });

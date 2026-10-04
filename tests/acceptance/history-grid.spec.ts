@@ -231,7 +231,15 @@ type CellReading = {
  * different, because the second is the one somebody comes back to to put the readings in.
  */
 const AWAITING = 'awaiting' as const;
-type CellState = CellReading | null | typeof AWAITING;
+/**
+ * A recorded entry with only half of its pair: it looks and is named like AWAITING, and
+ * still shows the half that IS recorded, unbanded, rather than a dash alone.
+ */
+type PartialReading = { readonly partial: readonly string[] };
+type CellState = CellReading | PartialReading | null | typeof AWAITING;
+
+const isPartial = (state: CellState): state is PartialReading =>
+  state !== null && typeof state === 'object' && 'partial' in state;
 
 type CellExpectation = {
   /** Which column, left to right: breakfast, lunch, dinner, then 3 is the night. */
@@ -311,25 +319,26 @@ const rows: readonly RowExpectation[] = [
     cells: [
       {
         // Recorded, but nobody has taken the after reading yet: the before reading in
-        // Before, and in Change and Both a cell marked as awaiting its reading -- never
-        // the look of a slot with nothing recorded in it.
+        // Before, and in Change and Both a cell marked as awaiting its reading that still
+        // shows the 64 it has -- never the look of a slot with nothing recorded in it.
         column: 0,
         names: /breakfast/i,
         before: { reads: ['64'], band: 'low' },
-        change: AWAITING,
-        both: AWAITING,
+        change: { partial: ['64'] },
+        both: { partial: ['64'] },
       },
       // Recorded with no reading at all: awaiting in every view.
       { column: 1, names: /lunch/i, before: AWAITING, change: AWAITING, both: AWAITING },
       { column: 2, names: /dinner/i, before: null, change: null, both: null },
       {
         // Bedtime 175, and the next day has no breakfast reading -- only a lunch's 120, which
-        // is not a morning reading. So the night is awaiting its morning in Change and Both.
+        // is not a morning reading. So the night is awaiting its morning in Change and Both,
+        // and shows the bedtime 175 it has.
         column: 3,
         names: NIGHT_NAME,
         before: { reads: ['175'], band: 'elevated' },
-        change: AWAITING,
-        both: AWAITING,
+        change: { partial: ['175'] },
+        both: { partial: ['175'] },
       },
     ],
   },
@@ -912,6 +921,26 @@ const assertCell = async (
   const located = await cellAt(await rowFor(page, row.daysAgo), cell.column);
   const expected = cell[view];
   const text = normaliseSigns(await textOf(located));
+
+  if (isPartial(expected)) {
+    // Half a pair: the half that is recorded is shown, but no band, because a change needs
+    // both readings and a missing one is never drawn as a change of zero.
+    await expect(located.locator('[data-level-band]'), `${where} carries no level band`).toHaveCount(0);
+    await expect(located.locator('[data-change-band]'), `${where} carries no change band`).toHaveCount(0);
+    for (const fragment of expected.partial) {
+      expect(text, `${where} still shows the recorded ${fragment}`).toContain(fragment);
+    }
+    expect(await controlCount(located), `${where} is one control`).toBe(1);
+    const opener = await controlIn(located);
+    const spokenPartial = normaliseSigns((await opener.getAttribute('aria-label')) ?? '');
+    expect(spokenPartial, `${where} names its day`).toMatch(dayLabel(row.daysAgo));
+    expect(spokenPartial, `${where} names its column`).toMatch(cell.names);
+    for (const fragment of expected.partial) {
+      expect(spokenPartial, `${where} names its reading ${fragment}`).toContain(fragment);
+    }
+    await assertRecordedOrNot(page, located, where, spokenPartial, true);
+    return;
+  }
 
   if (expected === null || expected === AWAITING) {
     // Nothing behind it: an empty outline carrying no band and no digits, because a missing

@@ -64,11 +64,11 @@ export type MealDraft = {
 };
 
 /**
- * A meal needs a slot, a time and at least one food. Everything else is optional,
- * because a person who forgot to measure must still be able to record what they
- * ate, and the app never invents a dose on their behalf.
+ * A meal needs a slot and a time. Everything else is optional, the foods included:
+ * a person who forgot to measure must still be able to record what they ate, a
+ * person in a hurry must be able to record the reading now and the foods later,
+ * and the app never invents a dose on their behalf.
  */
-export const NO_FOOD_REFUSAL = 'Add at least one food.';
 export const NO_TIME_REFUSAL = 'Enter a time.';
 export const NO_FOOD_NAME_REFUSAL = 'Name the food.';
 export const NO_FOOD_TYPE_REFUSAL = 'Choose a food type.';
@@ -228,8 +228,7 @@ const textField = (text: string): string | null => {
 
 /**
  * The foods of the draft that are complete enough to record. A food with no type
- * is not a food this product can compare, so it is not counted -- which is also
- * why an incomplete food cannot satisfy the 'at least one food' rule.
+ * is not a food this product can compare, so it is not counted.
  */
 const recordedFoods = (foods: readonly FoodDraft[]): readonly FoodRecording[] =>
   foods.flatMap((food): readonly FoodRecording[] => {
@@ -250,7 +249,6 @@ const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
 /** Why this meal cannot be saved yet, or null when it can. */
 export const mealDraftRefusal = (draft: MealDraft): string | null => {
   if (!TIME_PATTERN.test(draft.time.trim())) return NO_TIME_REFUSAL;
-  if (recordedFoods(draft.foods).length === 0) return NO_FOOD_REFUSAL;
   return null;
 };
 

@@ -155,15 +155,27 @@ const emptyCell = (cell: EmptyCell, handlers: HistoryHandlers): HTMLElement => {
 };
 
 /**
- * A recorded entry with no reading to show yet: a solid outline on a soft fill
- * and a dash, so it stands apart from the dashed slots with nothing in them.
+ * A recorded entry with no complete reading yet: a solid outline on a soft fill,
+ * so it stands apart from the dashed slots with nothing in them. It shows the half
+ * of the pair that is recorded over a dash for the other, or a dash alone when
+ * neither is, and carries no band.
  */
 const awaitingCell = (cell: AwaitingCell, handlers: HistoryHandlers): HTMLElement => {
   const control = document.createElement('button');
-  control.className = 'history__tap history__tap--awaiting';
+  control.className =
+    cell.readings.length > 1
+      ? 'history__tap history__tap--awaiting history__tap--pair'
+      : 'history__tap history__tap--awaiting';
   control.type = 'button';
   control.setAttribute('aria-label', cell.name);
-  control.append(element('span', 'history__awaiting-mark', '—'));
+  if (cell.readings.length === 0) {
+    control.append(element('span', 'history__awaiting-mark', '—'));
+  }
+  for (const text of cell.readings) {
+    control.append(
+      element('span', text === '—' ? 'history__awaiting-mark' : 'history__reading', text),
+    );
+  }
   control.addEventListener('click', () => handlers.onOpen(cell.target));
   return control;
 };
