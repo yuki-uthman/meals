@@ -6,7 +6,7 @@ import {
   type NightDraft,
   type NightRow,
 } from '../domain/night';
-import { formScreen, notice, numberField } from './meal-form';
+import { foodList, formScreen, notice, numberField, type FoodListHandlers } from './meal-form';
 
 // The night screen, as a pure function from a draft and the five-night list to a
 // DOM subtree. It decides nothing: whether a night may be saved is a rule in
@@ -34,11 +34,15 @@ export type NightFormState = {
   readonly message: string | null;
 };
 
-export type NightFormHandlers = {
+export type NightFormHandlers = FoodListHandlers & {
   readonly onUnits: (value: string) => void;
   readonly onTakenAt: (value: string) => void;
   readonly onBedtimeGlucose: (value: string) => void;
 };
+
+/** The heading over what was eaten with the dose, and what it is for. */
+export const NIGHT_FOODS_HEADING = 'Food';
+const NIGHT_FOODS_HINT = 'Anything eaten with the dose, such as a small snack when glucose is low.';
 
 /** A part of a row that exists only because this account recorded it. */
 const recorded = (className: string, text: string): HTMLElement => {
@@ -158,6 +162,9 @@ export const nightForm = (state: NightFormState, handlers: NightFormHandlers): H
       draft.bedtimeGlucose,
       handlers.onBedtimeGlucose,
     ),
+    // Below the bedtime reading, because that reading is what decides whether
+    // something is eaten at all. Optional: most nights leave it empty.
+    foodList(draft.foods, handlers, NIGHT_FOODS_HEADING, NIGHT_FOODS_HINT),
   );
 
   return screen;

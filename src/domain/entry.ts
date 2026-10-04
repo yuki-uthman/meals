@@ -91,6 +91,11 @@ export type NightInsulin = {
   readonly units: number;
   readonly takenAt: Date | null;
   readonly bedtimeGlucose: number | null;
+  /**
+   * Anything eaten with the dose -- something small when the bedtime reading is on
+   * the low side. Usually empty. Absent reads the same as empty.
+   */
+  readonly foods?: readonly FoodPortion[];
 };
 
 export type DayLog = {
@@ -220,6 +225,8 @@ export type NightCard = {
   readonly kind: 'night';
   readonly label: string;
   readonly doses: readonly string[];
+  /** What was eaten with the dose, read as a meal card's foods are; null when nothing. */
+  readonly foods: string | null;
 };
 
 export type DayCard = MealCard | EmptySlotCard | NightCard;
@@ -260,6 +267,7 @@ export const dayCards = (log: DayLog): readonly DayCard[] => {
     kind: 'night',
     label: NIGHT_INSULIN_LABEL,
     doses: log.nightInsulin.map(nightInsulinLine),
+    foods: foodsText(log.nightInsulin.flatMap((night) => night.foods ?? [])),
   };
 
   return [...fixed, ...inSlot('snack').map(mealCard), night];

@@ -158,18 +158,21 @@ export const repeatSourceText = (source: RepeatSource): string =>
     month: 'short',
   })} · ${slotLabel(source.slot)}`;
 
-export const withFood = (draft: MealDraft, food: FoodDraft): MealDraft => ({
+/** Anything a food list is filled in on: a meal, or what was eaten with a night dose. */
+type WithFoods = { readonly foods: readonly FoodDraft[] };
+
+export const withFood = <D extends WithFoods>(draft: D, food: FoodDraft): D => ({
   ...draft,
   foods: [...draft.foods, food],
 });
 
 /** The food at this position replaced, keeping its place in the list. */
-export const withFoodAt = (draft: MealDraft, index: number, food: FoodDraft): MealDraft => ({
+export const withFoodAt = <D extends WithFoods>(draft: D, index: number, food: FoodDraft): D => ({
   ...draft,
   foods: draft.foods.map((existing, at) => (at === index ? food : existing)),
 });
 
-export const withoutFood =(draft: MealDraft, index: number): MealDraft => ({
+export const withoutFood = <D extends WithFoods>(draft: D, index: number): D => ({
   ...draft,
   foods: draft.foods.filter((_, at) => at !== index),
 });
@@ -231,7 +234,7 @@ const textField = (text: string): string | null => {
  * is not a food this product can compare, so it is not counted -- which is also
  * why an incomplete food cannot satisfy the 'at least one food' rule.
  */
-const recordedFoods = (foods: readonly FoodDraft[]): readonly FoodRecording[] =>
+export const recordedFoods = (foods: readonly FoodDraft[]): readonly FoodRecording[] =>
   foods.flatMap((food): readonly FoodRecording[] => {
     const name = food.name.trim();
     if (name === '' || food.foodType === null) return [];

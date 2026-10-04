@@ -3,6 +3,7 @@ import { SESSION_ENDED, UNREACHABLE_SERVER } from '../../ports/identity';
 import {
   MEAL_NOT_HERE,
   MEAL_NOT_SAVED,
+  NIGHT_NOT_SAVED,
   type CreateFoodOutcome,
   type DayLogOutcome,
   type FoodCatalogueOutcome,
@@ -45,6 +46,12 @@ const MEAL_SELECT = `
 `;
 
 const NIGHT_SELECT = 'id, night_on, units, taken_at, bedtime_glucose';
+
+/** The night with what was eaten with it, for the screens that show the foods. */
+const NIGHT_WITH_FOODS_SELECT = `
+  ${NIGHT_SELECT},
+  night_foods ( id, name, food_type, amount, unit, position )
+`;
 
 const asNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null;
@@ -112,6 +119,7 @@ type NightRow = {
   units?: unknown;
   taken_at?: unknown;
   bedtime_glucose?: unknown;
+  night_foods?: unknown;
 };
 
 const toNightInsulin = (row: NightRow): NightInsulin => ({
@@ -120,6 +128,9 @@ const toNightInsulin = (row: NightRow): NightInsulin => ({
   units: asNumber(row.units) ?? 0,
   takenAt: row.taken_at === null || row.taken_at === undefined ? null : new Date(String(row.taken_at)),
   bedtimeGlucose: asNumber(row.bedtime_glucose),
+  foods: Array.isArray(row.night_foods)
+    ? [...(row.night_foods as FoodRow[])].sort(byPosition).map(toFood)
+    : [],
 });
 
 /**
@@ -175,12 +186,13 @@ const mealFields = (recording: MealRecording): Record<string, unknown> => ({
   note: recording.note,
 });
 
-const foodRows = (
-  mealId: string,
+/** A recording's foods as rows, each written against the record it belongs to. */
+const foodLines = (
+  owner: { readonly meal_id: string } | { readonly night_id: string },
   foods: readonly FoodRecording[],
 ): Record<string, unknown>[] =>
   foods.map((food, index) => ({
-    meal_id: mealId,
+    ...owner,
     name: food.name,
     food_type: food.foodType,
     amount: food.amount,
@@ -189,6 +201,13 @@ const foodRows = (
     // order they were entered rather than in whatever order Postgres returns.
     position: index + 1,
   }));
+
+const foodRows = (mealId: string, foods: readonly FoodRecording[]): Record<string, unknown>[] =>
+  foodLines({ meal_id: mealId }, foods);
+
+/** The same lines, written against a night rather than a meal. */
+const nightFoodRows = (nightId: string, foods: readonly FoodRecording[]): Record<string, unknown>[] =>
+  foodLines({ night_id: nightId }, foods);
 
 const rowIds = (rows: unknown): string[] =>
   (Array.isArray(rows) ? (rows as { id?: unknown }[]) : []).map((row) => String(row.id));
@@ -276,6 +295,33 @@ const existingNightId = async (
   if (found.error !== null) return toNightFailure(found.error, found.status);
   const rows = Array.isArray(found.data) ? (found.data as { id?: unknown }[]) : [];
   return { id: rows.length === 0 ? null : String(rows[0]?.id) };
+};
+
+/**
+ * The night's foods replaced by what the recording holds. The new rows are written
+ * before the old ones are removed, so a failed insert leaves what was recorded
+ * standing rather than emptying the night.
+ */
+const replaceNightFoods = async (
+  client: SupabaseClient,
+  id: string,
+  foods: readonly FoodRecording[],
+): Promise<SaveNightOutcome> => {
+  const existing = await client.from('night_foods').select('id').eq('night_id', id);
+  if (existing.error !== null) return toNightFailure(existing.error, existing.status);
+
+  if (foods.length > 0) {
+    const inserted = await client.from('night_foods').insert(nightFoodRows(id, foods));
+    if (inserted.error !== null) return { kind: 'refused', message: NIGHT_NOT_SAVED };
+  }
+
+  const previous = rowIds(existing.data);
+  if (previous.length > 0) {
+    const removed = await client.from('night_foods').delete().in('id', previous);
+    if (removed.error !== null) return toNightFailure(removed.error, removed.status);
+  }
+
+  return { kind: 'saved', id };
 };
 
 const MORNING_SELECT = 'slot, eaten_on, eaten_at, glucose_before';
@@ -514,7 +560,19 @@ export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
           .select('id')
           .single();
         if (created.error !== null) return toNightFailure(created.error, created.status);
-        return { kind: 'saved', id: String((created.data as { id?: unknown }).id) };
+        const createdId = String((created.data as { id?: unknown }).id);
+        if (recording.foods.length === 0) return { kind: 'saved', id: createdId };
+
+        // A new night and its foods together: if the foods do not land, the night is
+        // removed again, so a save either records what was entered or nothing.
+        const foods = await client
+          .from('night_foods')
+          .insert(nightFoodRows(createdId, recording.foods));
+        if (foods.error !== null) {
+          await client.from('night_insulin').delete().eq('id', createdId);
+          return { kind: 'refused', message: NIGHT_NOT_SAVED };
+        }
+        return { kind: 'saved', id: createdId };
       }
 
       // Updating the night the date already holds, so recording twice corrects
@@ -525,7 +583,7 @@ export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
         .eq('id', id)
         .select('id');
       if (updated.error !== null) return toNightFailure(updated.error, updated.status);
-      return { kind: 'saved', id };
+      return await replaceNightFoods(client, id, recording.foods);
     } catch {
       // The request never got an answer at all, so whether Postgres committed is
       // unknown. It is reported as worth retrying and never retried here.
@@ -625,7 +683,7 @@ export const supabaseLogStore = (client: SupabaseClient): LogStore => ({
           .select(MEAL_SELECT)
           .eq('eaten_on', date)
           .order('eaten_at', { ascending: true }),
-        client.from('night_insulin').select(NIGHT_SELECT).eq('night_on', date),
+        client.from('night_insulin').select(NIGHT_WITH_FOODS_SELECT).eq('night_on', date),
       ]);
 
       if (mealsResult.error !== null) return toFailure(mealsResult.error, mealsResult.status);
