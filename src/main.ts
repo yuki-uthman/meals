@@ -239,6 +239,11 @@ const start = (): void => {
    */
   let foodIndex: number | null = null;
   /**
+   * Which form the food screen hands its food back to: the meal being filled in,
+   * or the night, when something small was eaten with the dose.
+   */
+  let foodFor: 'meal' | 'night' = 'meal';
+  /**
    * The signed-in account's own foods, read before the Add food screen is shown and
    * re-read every time it is: what is offered must be what the store holds, never
    * what an abandoned screen was holding. Held here rather than in the screen for
@@ -363,9 +368,9 @@ const start = (): void => {
           onInsulinUnits: (insulinUnits) => patchMeal({ insulinUnits }),
           onExerciseContext: (exerciseContext: ExerciseContext) => patchMeal({ exerciseContext }),
           onNote: (note) => patchMeal({ note }),
-          onAddFood: () => void openFoodForm(),
-          onEditFood: (index) => void openEditFood(index),
-          onRemoveFood: (index) => removeFood(index),
+          onAddFood: () => void openFoodForm('meal'),
+          onEditFood: (index) => void openEditFood(index, 'meal'),
+          onRemoveFood: (index) => removeFood(index, 'meal'),
         },
       ),
     );
@@ -410,6 +415,9 @@ const start = (): void => {
           onUnits: (units) => patchNight({ units }),
           onTakenAt: (takenAt) => patchNight({ takenAt }),
           onBedtimeGlucose: (bedtimeGlucose) => patchNight({ bedtimeGlucose }),
+          onAddFood: () => void openFoodForm('night'),
+          onEditFood: (index) => void openEditFood(index, 'night'),
+          onRemoveFood: (index) => removeFood(index, 'night'),
         },
       ),
     );
@@ -806,7 +814,7 @@ const start = (): void => {
         return;
       }
 
-      if (name === 'food' && mealDraft !== null) {
+      if (name === 'food' && (foodFor === 'night' ? nightDraft : mealDraft) !== null) {
         // A screen rebuilt from an entry with no draft in hand is a fresh Add food,
         // so its name is a name being typed and its catalogue is read.
         if (foodDraft === null) {
@@ -823,6 +831,8 @@ const start = (): void => {
 
       if (name === 'night' && first !== undefined) {
         if (nightDraft !== null && nightHistory !== null && date === first) {
+          // Coming back from the food screen keeps what was filled in on the night.
+          foodDraft = null;
           formMessage = null;
           screen = 'night';
           render();
@@ -1380,8 +1390,9 @@ const start = (): void => {
    * be a moving target. It is re-read on every opening, so what is offered is what
    * the store holds rather than what the last visit to this screen was holding.
    */
-  const openFoodForm = async (): Promise<void> => {
+  const openFoodForm = async (target: 'meal' | 'night'): Promise<void> => {
     if (!(await loadFoodCatalogue())) return;
+    foodFor = target;
     foodDraft = emptyFoodDraft;
     foodIndex = null;
     foodNameState = TYPED_NAME;
@@ -1396,10 +1407,11 @@ const start = (): void => {
    * holds opens chosen, so its type is stated rather than asked again, and handing
    * it back replaces it in its place in the list rather than adding a second one.
    */
-  const openEditFood = async (index: number): Promise<void> => {
-    const food = mealDraft?.foods[index];
+  const openEditFood = async (index: number, target: 'meal' | 'night'): Promise<void> => {
+    const food = (target === 'night' ? nightDraft : mealDraft)?.foods[index];
     if (food === undefined) return;
     if (!(await loadFoodCatalogue())) return;
+    foodFor = target;
     const owned = ownedFood(catalogue, food.name);
     foodDraft = owned === null ? food : { ...food, name: owned.name, foodType: owned.foodType };
     foodIndex = index;
@@ -1442,10 +1454,16 @@ const start = (): void => {
    * the unit come from what was just typed.
    */
   const addFoodToMeal = (food: CatalogueFood, draft: FoodDraft): void => {
-    if (mealDraft === null) return;
     const kept = { ...draft, name: food.name, foodType: food.foodType };
-    mealDraft =
-      foodIndex === null ? withFood(mealDraft, kept) : withFoodAt(mealDraft, foodIndex, kept);
+    if (foodFor === 'night') {
+      if (nightDraft === null) return;
+      nightDraft =
+        foodIndex === null ? withFood(nightDraft, kept) : withFoodAt(nightDraft, foodIndex, kept);
+    } else {
+      if (mealDraft === null) return;
+      mealDraft =
+        foodIndex === null ? withFood(mealDraft, kept) : withFoodAt(mealDraft, foodIndex, kept);
+    }
     backToMeal();
   };
 
@@ -1458,9 +1476,14 @@ const start = (): void => {
     goBack();
   };
 
-  const removeFood = (index: number): void => {
-    if (mealDraft === null) return;
-    mealDraft = withoutFood(mealDraft, index);
+  const removeFood = (index: number, target: 'meal' | 'night'): void => {
+    if (target === 'night') {
+      if (nightDraft === null) return;
+      nightDraft = withoutFood(nightDraft, index);
+    } else {
+      if (mealDraft === null) return;
+      mealDraft = withoutFood(mealDraft, index);
+    }
     render();
   };
 
@@ -1475,7 +1498,8 @@ const start = (): void => {
    */
   const keepFood = async (): Promise<void> => {
     const draft = foodDraft;
-    if (draft === null || mealDraft === null || creatingFood) return;
+    const receiving = foodFor === 'night' ? nightDraft : mealDraft;
+    if (draft === null || receiving === null || creatingFood) return;
 
     const typed = draft.name.trim();
     if (typed === '') {

@@ -179,6 +179,7 @@ const nightCardItem = (card: NightCard, handlers: DayLogHandlers): HTMLElement =
   } else {
     for (const dose of card.doses) open.append(recorded('p', 'card__dose', dose));
   }
+  if (card.foods !== null) open.append(recorded('p', 'card__foods', card.foods));
   open.addEventListener('click', () => handlers.onOpenNight());
 
   item.append(open);

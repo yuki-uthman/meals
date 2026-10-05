@@ -369,3 +369,57 @@ test('the night dose is recorded and the last five nights read as dose and next-
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
+
+test('something small eaten with the night dose is recorded with the night, and can be removed again', async ({
+  browser,
+}) => {
+  const phone = await openPhone(browser);
+  await signIn(phone, accounts.owner);
+
+  // Tonight was recorded by the test above; opening it again is how a snack eaten
+  // because the bedtime reading was on the low side is added to it.
+  await openNightScreen(phone);
+  await expect(doseField(phone)).toHaveValue('18');
+
+  await bedtimeGlucoseField(phone).fill('92');
+
+  // The same Add food screen a meal uses: a first-time food is created, typed and
+  // measured, and handed back to the night rather than to any meal.
+  await phone.getByRole('button', { name: /add food/i }).click();
+  await phone.getByLabel('Food name', { exact: true }).fill('Crackers');
+  await phone.getByRole('button', { name: 'Create "Crackers"', exact: true }).click();
+  await phone.getByRole('radio', { name: /^carb-heavy$/i }).check();
+  await phone.getByLabel('Amount', { exact: true }).fill('2');
+  await phone.getByRole('radio', { name: /^pc$/i }).check();
+  await save(phone);
+
+  // Back on the night with what was typed there still in place, and the food listed.
+  await expect(bedtimeGlucoseField(phone)).toHaveValue('92');
+  await expect(doseField(phone)).toHaveValue('18');
+  await expect(phone.getByText(/Crackers/).first()).toBeVisible();
+
+  expect(await scrollsHorizontally(phone)).toBe(false);
+
+  await save(phone);
+
+  // Today's night card shows the dose and the food eaten with it.
+  const nightText = await textOf(await card(phone, 'Night insulin'));
+  expect(nightText).toContain('18 u at 22:30');
+  expect(nightText, 'the night card names the snack').toContain('Crackers 2 pc');
+
+  // The store agrees, and the snack belongs to the night, not to a meal: no snack card.
+  await phone.reload();
+  expect(await textOf(await card(phone, 'Night insulin'))).toContain('Crackers 2 pc');
+  await expect(cards(phone).filter({ hasText: /^\s*Snack/ })).toHaveCount(0);
+
+  // Reopening the night shows the food, and removing it records a night with none.
+  await openNightScreen(phone);
+  await phone.getByRole('button', { name: 'Remove Crackers', exact: true }).click();
+  await save(phone);
+
+  const after = await textOf(await card(phone, 'Night insulin'));
+  expect(after).toContain('18 u at 22:30');
+  expect(after, 'the removed snack is gone from the night').not.toContain('Crackers');
+  await phone.reload();
+  expect(await textOf(await card(phone, 'Night insulin'))).not.toContain('Crackers');
+});

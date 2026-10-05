@@ -18,6 +18,12 @@ import {
   type MealSlot,
   type NightInsulin,
 } from './entry';
+import {
+  foodDraftFrom,
+  recordedFoods,
+  type FoodDraft,
+  type FoodRecording,
+} from './meal-draft';
 
 /**
  * The night being filled in. Like a meal draft it holds what the person typed, as
@@ -37,6 +43,11 @@ export type NightDraft = {
   /** Local clock time as 'HH:MM', or empty when the person did not say. */
   readonly takenAt: string;
   readonly bedtimeGlucose: string;
+  /**
+   * Anything eaten with the dose: something small when the bedtime reading is on
+   * the low side. Optional, so most nights leave it empty.
+   */
+  readonly foods: readonly FoodDraft[];
 };
 
 /**
@@ -70,6 +81,7 @@ export const newNightDraft = (date: IsoDate, now: Date = new Date()): NightDraft
   units: '',
   takenAt: clockTime(now),
   bedtimeGlucose: '',
+  foods: [],
 });
 
 /** A recorded number back in a field: 18 reads as '18', never as '18.00'. */
@@ -86,6 +98,7 @@ export const nightDraftFrom = (night: NightInsulin, date: IsoDate): NightDraft =
   units: fieldText(night.units),
   takenAt: night.takenAt === null ? '' : clockTime(night.takenAt),
   bedtimeGlucose: fieldText(night.bedtimeGlucose),
+  foods: (night.foods ?? []).map(foodDraftFrom),
 });
 
 // ------------------------------------------------------------- recording
@@ -101,6 +114,8 @@ export type NightRecording = {
   readonly units: number;
   readonly takenAt: Date | null;
   readonly bedtimeGlucose: number | null;
+  /** Possibly none: a night needs no food to be recorded. */
+  readonly foods: readonly FoodRecording[];
 };
 
 const numberField = (text: string): number | null => {
@@ -154,6 +169,7 @@ export const nightRecording = (draft: NightDraft): NightRecording | null => {
     // says when the dose was taken, and nobody but the person knows that.
     takenAt: TIME_PATTERN.test(time) ? atLocalTime(draft.date, time) : null,
     bedtimeGlucose: glucoseField(draft.bedtimeGlucose),
+    foods: recordedFoods(draft.foods),
   };
 };
 

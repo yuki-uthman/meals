@@ -18,7 +18,8 @@ shows is one you recorded before.
 - **Recording** — slot, time, foods (name, type, amount, unit), glucose before, dose,
   exercise context, note, and glucose after whenever you measure it. An in-app number
   pad for glucose fields with chips for your last reading; a one-unit stepper for doses.
-- **Night insulin** — the dose, the time and the bedtime reading, with the last five
+- **Night insulin** — the dose, the time and the bedtime reading, and any food eaten
+  with it (something small when the reading is on the low side), with the last five
   nights shown as dose against next-morning reading.
 - **Meal detail** — what was eaten, the dose, the readings, the note, and every other
   time you ate the same foods, newest first. *Log again* copies the foods only.
@@ -41,7 +42,7 @@ You need a free Supabase project and a GitHub repository with Pages enabled.
    npx supabase db push
    ```
 
-   This creates `meals`, `meal_foods` and `night_insulin`, each owner-scoped with
+   This creates `meals`, `meal_foods`, `night_insulin`, `night_foods` and `foods`, each owner-scoped with
    row-level security on `auth.uid()`.
 
 2. **Create the accounts.** In the Supabase dashboard under Authentication, add one

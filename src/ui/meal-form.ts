@@ -308,19 +308,42 @@ const foodRow = (
   return row;
 };
 
-const foodList = (state: MealFormState, handlers: MealFormHandlers): HTMLElement => {
+export type FoodListHandlers = {
+  readonly onAddFood: () => void;
+  readonly onEditFood: (index: number) => void;
+  readonly onRemoveFood: (index: number) => void;
+};
+
+/**
+ * The foods being filled in, each reopenable and removable, and the way to add
+ * another. Shared by the meal screen and the night screen, so a food is added,
+ * corrected and removed the same way wherever it is eaten.
+ */
+export const foodList = (
+  foods: readonly FoodDraft[],
+  handlers: FoodListHandlers,
+  headingText = 'Foods',
+  hintText: string | null = null,
+): HTMLElement => {
   const section = document.createElement('div');
   section.className = 'food-list';
 
   const heading = document.createElement('h2');
   heading.className = 'form__heading';
-  heading.textContent = 'Foods';
+  heading.textContent = headingText;
   section.append(heading);
 
-  if (state.draft.foods.length > 0) {
+  if (hintText !== null) {
+    const hint = document.createElement('p');
+    hint.className = 'food-list__hint';
+    hint.textContent = hintText;
+    section.append(hint);
+  }
+
+  if (foods.length > 0) {
     const list = document.createElement('ul');
     list.className = 'food-list__rows';
-    state.draft.foods.forEach((food, index) => {
+    foods.forEach((food, index) => {
       list.append(foodRow(food, index, handlers.onEditFood, handlers.onRemoveFood));
     });
     section.append(list);
@@ -493,7 +516,7 @@ export const mealForm = (state: MealFormState, handlers: MealFormHandlers): HTML
     // The panel sits beside the after reading, because that is the number it is
     // about -- and it only ever reports beside it, never into it.
     ...(hasFoods ? [panel] : []),
-    foodList(state, handlers),
+    foodList(draft.foods, handlers),
     choiceGroup<ExerciseContext>(
       'meal-exercise',
       'Exercise',
