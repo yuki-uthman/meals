@@ -1287,9 +1287,14 @@ const start = (): void => {
       if (today.kind === 'loaded') {
         const existing = today.log.meals.find((meal) => meal.slot === source.slot);
         if (existing !== undefined) {
-          // Keep what was already recorded for the day (time, readings, dose, note)
-          // and swap in the repeated foods.
-          draft = { ...mealDraftFrom(existing, opening), foods: draft.foods, copiedFrom: draft.copiedFrom ?? null };
+          // Replace that row, carrying over only its before reading: it was taken
+          // for this very meal, so it is filled in rather than asked for again.
+          // Everything else starts fresh, as in any repeat.
+          draft = {
+            ...draft,
+            mealId: existing.id,
+            glucoseBefore: mealDraftFrom(existing, opening).glucoseBefore,
+          };
         }
       }
     }
