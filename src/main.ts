@@ -1289,7 +1289,7 @@ const start = (): void => {
         if (existing !== undefined) {
           // Keep what was already recorded for the day (time, readings, dose, note)
           // and swap in the repeated foods.
-          draft = { ...mealDraftFrom(existing, opening), foods: draft.foods, copiedFrom: draft.copiedFrom };
+          draft = { ...mealDraftFrom(existing, opening), foods: draft.foods, copiedFrom: draft.copiedFrom ?? null };
         }
       }
     }
