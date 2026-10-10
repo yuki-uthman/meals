@@ -13,6 +13,7 @@ import { createSupabaseClient } from './adapters/supabase/client';
 import { supabaseIdentity } from './adapters/supabase/identity';
 import { supabaseLogStore } from './adapters/supabase/log-store';
 import {
+  FIXED_SLOTS,
   localToday,
   shiftDate,
   type AmountUnit,
@@ -1273,8 +1274,28 @@ const start = (): void => {
     const opening = localToday();
     if (!(await loadMealHistory())) return;
 
+    // A day holds one breakfast, lunch and dinner. When today already has one in the
+    // source's slot, the repeat replaces it: the draft carries that row's id so the
+    // save updates it instead of writing a second dinner. Snacks may repeat freely.
+    let draft = repeatMealDraft(source, opening);
+    if (FIXED_SLOTS.includes(source.slot)) {
+      const today = await logStore.dayLog(opening);
+      if (today.kind === 'session-ended') {
+        await endSession(today.message);
+        return;
+      }
+      if (today.kind === 'loaded') {
+        const existing = today.log.meals.find((meal) => meal.slot === source.slot);
+        if (existing !== undefined) {
+          // Keep what was already recorded for the day (time, readings, dose, note)
+          // and swap in the repeated foods.
+          draft = { ...mealDraftFrom(existing, opening), foods: draft.foods, copiedFrom: draft.copiedFrom };
+        }
+      }
+    }
+
     date = opening;
-    mealDraft = repeatMealDraft(source, opening);
+    mealDraft = draft;
     clearDetail();
     foodDraft = null;
     nightDraft = null;
