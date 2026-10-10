@@ -320,3 +320,85 @@ test('a meal is logged again with only its foods copied, as a separate record th
 
   expect(await scrollsHorizontally(phone)).toBe(false);
 });
+
+test("logging again over a dinner already begun today replaces it, keeping only its before reading", async ({
+  browser,
+}) => {
+  const admin = createClient(stack.supabaseUrl, stack.serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  // Today starts from a single dinner with only the before reading recorded, as when a
+  // person takes the reading and has not yet eaten. Whatever the earlier test left on
+  // today is cleared, so the only dinner is the begun one.
+  const today = localDateOnly(accounts.date);
+  const cleared = await admin
+    .from('meals')
+    .delete()
+    .eq('user_id', accounts.owner.id)
+    .eq('eaten_on', today);
+  if (cleared.error) throw new Error(`could not clear today: ${cleared.error.message}`);
+  const begun = await admin.from('meals').insert({
+    user_id: accounts.owner.id,
+    slot: 'dinner',
+    eaten_on: today,
+    eaten_at: localTime(accounts.date, 18, 30),
+    glucose_before: 120,
+  });
+  if (begun.error) throw new Error(`could not seed the begun dinner: ${begun.error.message}`);
+
+  const phone = await openPhone(browser);
+  await signIn(phone, accounts.owner);
+
+  // Yesterday's dinner is the one being eaten again.
+  await phone.getByRole('button', { name: /^previous day$/i }).click();
+  await openDetail(phone, 'Dinner');
+  await phone.getByRole('button', { name: LOG_AGAIN }).click();
+
+  // It is today's dinner being completed, so it opens on that meal rather than on a
+  // second one, with the foods copied and the before reading already in.
+  await expect(phone.getByRole('heading', { name: /^edit meal$/i })).toBeVisible();
+  const formText = await textOf(phone.locator('body'));
+  for (const fragment of ['Chicken rice', 'Cucumber salad', '250 g', '80 g']) {
+    expect(formText, `${fragment} is copied`).toContain(fragment);
+  }
+  await expect(
+    phone.getByLabel('Glucose before', { exact: true }),
+    "today's before reading is filled in",
+  ).toHaveValue('120');
+
+  // Nothing else of either meal comes across.
+  await expect(phone.getByLabel('Glucose after', { exact: true })).toHaveValue('');
+  await expect(phone.getByLabel('Rapid-acting units', { exact: true })).toHaveValue('');
+  await expect(phone.getByLabel('Note', { exact: true })).toHaveValue('');
+
+  await phone.getByLabel('Rapid-acting units', { exact: true }).fill('5');
+  await save(phone);
+
+  // One dinner on the day, not two: the begun one now holds the foods.
+  await expect(phone.getByRole('heading', { name: /^today$/i })).toBeVisible();
+  const dinner = await card(phone, 'Dinner');
+  const dinnerText = await textOf(dinner);
+  for (const fragment of ['Chicken rice 250 g · Cucumber salad 80 g', '120', '5 u']) {
+    expect(dinnerText, `today's Dinner card must read ${fragment}`).toContain(fragment);
+  }
+
+  // The database holds the same single row, the one that was begun.
+  const rows = await admin
+    .from('meals')
+    .select('slot, glucose_before, insulin_units')
+    .eq('user_id', accounts.owner.id)
+    .eq('eaten_on', today)
+    .eq('slot', 'dinner');
+  expect(rows.error).toBeNull();
+  expect(rows.data, 'exactly one dinner on today').toHaveLength(1);
+  expect(Number(rows.data?.[0]?.glucose_before)).toBe(120);
+  expect(Number(rows.data?.[0]?.insulin_units)).toBe(5);
+
+  // Yesterday's dinner is untouched.
+  await phone.getByRole('button', { name: /^previous day$/i }).click();
+  const source = await card(phone, 'Dinner');
+  for (const fragment of ['110', '142', '6 u']) {
+    expect(await textOf(source), `the source Dinner still reads ${fragment}`).toContain(fragment);
+  }
+});
